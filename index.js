@@ -1,3 +1,14 @@
+const express = require('express');
+const app = express();
+const port = process.env.PORT || 10000;
+
+app.get('/', (req, res) => {
+  res.send('Bot is alive and running!');
+});
+
+app.listen(port, '0.0.0.0', () => {
+  console.log(`Web server listening on port ${port}`);
+});
 require('dotenv').config();
 const { Bot, InlineKeyboard, InputFile } = require('grammy');
 const Database = require('better-sqlite3');
