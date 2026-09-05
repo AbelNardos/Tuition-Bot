@@ -256,7 +256,7 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
   }
 
   await ctx.editMessageText(
-    `🔄 Student receipt successfully transferred to **${newDept}** by **${staffName}**.`,
+    `🔄 Student receipt (ID: \`${targetUserId}\`) successfully transferred to **${newDept}** by **${staffName}**.`,
     { parse_mode: 'Markdown' }
   );
 });
