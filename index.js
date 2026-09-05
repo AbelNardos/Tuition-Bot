@@ -15,6 +15,18 @@ const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 
+const express = require('express');
+const app = express();
+const port = process.env.PORT || 10000;
+
+app.get('/', (req, res) => {
+  res.send('Bot is alive and running!');
+});
+
+app.listen(port, '0.0.0.0', () => {
+  console.log(`Web server listening on port ${port}`);
+});
+
 const bot = new Bot(process.env.BOT_TOKEN);
 
 const STAFF_GROUP_ID = String(process.env.STAFF_GROUP_ID).trim();
@@ -217,8 +229,30 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
 
   await ctx.answerCallbackQuery();
 
+  const ticket = db.prepare('SELECT * FROM tickets WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1').get(targetUserId);
+  
+  if (!ticket) {
+    return ctx.editMessageText("❌ Error: Ticket not found.", { parse_mode: 'Markdown' });
+  }
+
   const newTopicId = await getOrCreateDepartmentTopic(ctx, newDept);
+
   db.prepare('UPDATE tickets SET department = ?, topic_id = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1').run(newDept, newTopicId, targetUserId);
+
+  const actionKeyboard = new InlineKeyboard()
+    .text("✅ Approve", `app_${targetUserId}_${newTopicId}`).row()
+    .text("❌ Reject", `rej_${targetUserId}_${newTopicId}`).row()
+    .text("🔄 Transfer Dept", `trans_${targetUserId}`);
+
+  try {
+    await ctx.api.sendMessage(
+      STAFF_GROUP_ID,
+      `📥 **Transferred Submission**\n• Student ID: \`${targetUserId}\`\n• Transferred to Department: **${newDept}**\n• Transferred by: **${staffName}**`,
+      { message_thread_id: newTopicId, parse_mode: 'Markdown', reply_markup: actionKeyboard }
+    );
+  } catch (err) {
+    console.error("Failed to post transfer card:", err);
+  }
 
   await ctx.editMessageText(
     `🔄 Student receipt transferred to **${newDept}** by **${staffName}**.`,
