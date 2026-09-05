@@ -261,10 +261,11 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
         .text("❌ Reject", `rej_${targetUserId}_${newTopicId}`).row()
         .text("🔄 Transfer Dept", `trans_${targetUserId}`);
 
+      // Sent as plain text to avoid markdown parsing errors on usernames
       const newTicketMsg = await ctx.api.sendMessage(
         STAFF_GROUP_ID,
-        `📥 **Transferred Submission**\n• Student ID: \`${targetUserId}\`\n• Department: **${newDept}**\n• Transferred by: **${staffName}**`,
-        { message_thread_id: newTopicId, parse_mode: 'Markdown', reply_markup: actionKeyboard }
+        `📥 New Transferred Submission\n• Student ID: ${targetUserId}\n• Department: ${newDept}\n• Transferred by: ${staffName}`,
+        { message_thread_id: newTopicId, reply_markup: actionKeyboard }
       );
 
       await pool.query(`
@@ -315,13 +316,13 @@ bot.on('message', async (ctx) => {
         .text("❌ Reject", `rej_${userId}_${topicId}`).row()
         .text("🔄 Transfer Dept", `trans_${userId}`);
 
+      // Sent as plain text to prevent Markdown entity parsing crashes
       const sentTicketMsg = await ctx.api.sendMessage(
         STAFF_GROUP_ID,
-        `📥 **New Submission**\n• Student ID: \`${userId}\`\n• Username: @${username}\n• Department: **${chosenDept}**`,
-        { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: actionKeyboard }
+        `📥 New Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${chosenDept}`,
+        { message_thread_id: topicId, reply_markup: actionKeyboard }
       );
 
-      // Save to database AFTER messages are sent so IDs are captured properly
       await pool.query(`
         INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, department, status) 
         VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
