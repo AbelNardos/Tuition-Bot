@@ -28,6 +28,7 @@ db.exec(`
     user_id INTEGER,
     topic_id INTEGER,
     message_id INTEGER,
+    ticket_msg_id INTEGER,
     department TEXT,
     status TEXT DEFAULT 'PENDING',
     rejection_reason TEXT,
@@ -68,8 +69,8 @@ function getTransferKeyboard(userId) {
 }
 
 const stmtSaveTicket = db.prepare(`
-  INSERT INTO tickets (user_id, topic_id, message_id, department, status) 
-  VALUES (?, ?, ?, ?, 'PENDING')
+  INSERT INTO tickets (user_id, topic_id, message_id, ticket_msg_id, department, status) 
+  VALUES (?, ?, ?, ?, ?, 'PENDING')
 `);
 
 bot.catch((err) => console.error('Error in bot:', err));
@@ -218,10 +219,19 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
 
   await ctx.answerCallbackQuery();
 
-  const newTopicId = await getOrCreateDepartmentTopic(ctx, newDept);
-  const ticket = db.prepare('SELECT topic_id, message_id FROM tickets WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1').get(targetUserId);
+  const ticket = db.prepare('SELECT topic_id, message_id, ticket_msg_id FROM tickets WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1').get(targetUserId);
 
-  if (ticket && ticket.message_id) {
+  if (ticket) {
+    if (ticket.ticket_msg_id) {
+      try {
+        await ctx.api.deleteMessage(STAFF_GROUP_ID, ticket.ticket_msg_id);
+      } catch (e) {
+        console.error("Could not delete old ticket message:", e);
+      }
+    }
+
+    const newTopicId = await getOrCreateDepartmentTopic(ctx, newDept);
+
     try {
       await ctx.api.copyMessage(STAFF_GROUP_ID, STAFF_GROUP_ID, ticket.message_id, {
         message_thread_id: newTopicId
@@ -232,17 +242,18 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
         .text("❌ Reject", `rej_${targetUserId}_${newTopicId}`).row()
         .text("🔄 Transfer Dept", `trans_${targetUserId}`);
 
-      await ctx.api.sendMessage(
+      const newTicketMsg = await ctx.api.sendMessage(
         STAFF_GROUP_ID,
         `📥 **Transferred Submission**\n• Student ID: \`${targetUserId}\`\n• Department: **${newDept}**\n• Transferred by: **${staffName}**`,
         { message_thread_id: newTopicId, parse_mode: 'Markdown', reply_markup: actionKeyboard }
       );
+
+      db.prepare('UPDATE tickets SET department = ?, topic_id = ?, ticket_msg_id = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1').run(newDept, newTopicId, newTicketMsg.message_id, targetUserId);
+
     } catch (e) {
       console.error("Error moving message during transfer:", e);
     }
   }
-
-  db.prepare('UPDATE tickets SET department = ?, topic_id = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1').run(newDept, newTopicId, targetUserId);
 
   await ctx.editMessageText(
     `🔄 Student receipt successfully transferred to **${newDept}** by **${staffName}**.`,
@@ -266,20 +277,20 @@ bot.on('message', async (ctx) => {
       const forwardRes = await ctx.api.copyMessage(STAFF_GROUP_ID, ctx.chat.id, ctx.message.message_id, {
         message_thread_id: topicId
       });
-
       const forwardedMsgId = forwardRes.message_id;
-      stmtSaveTicket.run(userId, topicId, forwardedMsgId, chosenDept);
 
       const actionKeyboard = new InlineKeyboard()
         .text("✅ Approve", `app_${userId}_${topicId}`).row()
         .text("❌ Reject", `rej_${userId}_${topicId}`).row()
         .text("🔄 Transfer Dept", `trans_${userId}`);
 
-      await ctx.api.sendMessage(
+      const sentTicketMsg = await ctx.api.sendMessage(
         STAFF_GROUP_ID,
         `📥 **New Submission**\n• Student ID: \`${userId}\`\n• Department: **${chosenDept}**`,
         { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: actionKeyboard }
       );
+
+      stmtSaveTicket.run(userId, topicId, forwardedMsgId, sentTicketMsg.message_id, chosenDept);
 
       pendingDepartments.delete(userId);
       await ctx.reply("✅ Your receipt has been sent to the staff review team. We will notify you once verified.", { parse_mode: 'Markdown' });
