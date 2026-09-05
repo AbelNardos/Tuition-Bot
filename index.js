@@ -1,14 +1,3 @@
-const express = require('express');
-const app = express();
-const port = process.env.PORT || 10000;
-
-app.get('/', (req, res) => {
-  res.send('Bot is alive and running!');
-});
-
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Web server listening on port ${port}`);
-});
 require('dotenv').config();
 const express = require('express');
 const { Bot, InlineKeyboard, InputFile, webhookCallback } = require('grammy');
@@ -409,7 +398,6 @@ app.get('/', (req, res) => {
 async function main() {
   await initDB();
 
-  // Automatically register webhook URL on Render startup
   const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL; 
   if (RENDER_EXTERNAL_URL) {
     const webhookUrl = `${RENDER_EXTERNAL_URL}/webhook`;
