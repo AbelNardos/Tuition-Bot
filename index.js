@@ -15,18 +15,6 @@ const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 
-const express = require('express');
-const app = express();
-const port = process.env.PORT || 10000;
-
-app.get('/', (req, res) => {
-  res.send('Bot is alive and running!');
-});
-
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Web server listening on port ${port}`);
-});
-
 const bot = new Bot(process.env.BOT_TOKEN);
 
 const STAFF_GROUP_ID = String(process.env.STAFF_GROUP_ID).trim();
@@ -39,6 +27,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS tickets (
     user_id INTEGER,
     topic_id INTEGER,
+    message_id INTEGER,
     department TEXT,
     status TEXT DEFAULT 'PENDING',
     rejection_reason TEXT,
@@ -79,8 +68,8 @@ function getTransferKeyboard(userId) {
 }
 
 const stmtSaveTicket = db.prepare(`
-  INSERT INTO tickets (user_id, topic_id, department, status) 
-  VALUES (?, ?, ?, 'PENDING')
+  INSERT INTO tickets (user_id, topic_id, message_id, department, status) 
+  VALUES (?, ?, ?, ?, 'PENDING')
 `);
 
 bot.catch((err) => console.error('Error in bot:', err));
@@ -229,33 +218,34 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
 
   await ctx.answerCallbackQuery();
 
-  const ticket = db.prepare('SELECT * FROM tickets WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1').get(targetUserId);
-  
-  if (!ticket) {
-    return ctx.editMessageText("❌ Error: Ticket not found.", { parse_mode: 'Markdown' });
-  }
-
   const newTopicId = await getOrCreateDepartmentTopic(ctx, newDept);
+  const ticket = db.prepare('SELECT topic_id, message_id FROM tickets WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1').get(targetUserId);
+
+  if (ticket && ticket.message_id) {
+    try {
+      await ctx.api.copyMessage(STAFF_GROUP_ID, STAFF_GROUP_ID, ticket.message_id, {
+        message_thread_id: newTopicId
+      });
+
+      const actionKeyboard = new InlineKeyboard()
+        .text("✅ Approve", `app_${targetUserId}_${newTopicId}`).row()
+        .text("❌ Reject", `rej_${targetUserId}_${newTopicId}`).row()
+        .text("🔄 Transfer Dept", `trans_${targetUserId}`);
+
+      await ctx.api.sendMessage(
+        STAFF_GROUP_ID,
+        `📥 **Transferred Submission**\n• Student ID: \`${targetUserId}\`\n• Department: **${newDept}**\n• Transferred by: **${staffName}**`,
+        { message_thread_id: newTopicId, parse_mode: 'Markdown', reply_markup: actionKeyboard }
+      );
+    } catch (e) {
+      console.error("Error moving message during transfer:", e);
+    }
+  }
 
   db.prepare('UPDATE tickets SET department = ?, topic_id = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1').run(newDept, newTopicId, targetUserId);
 
-  const actionKeyboard = new InlineKeyboard()
-    .text("✅ Approve", `app_${targetUserId}_${newTopicId}`).row()
-    .text("❌ Reject", `rej_${targetUserId}_${newTopicId}`).row()
-    .text("🔄 Transfer Dept", `trans_${targetUserId}`);
-
-  try {
-    await ctx.api.sendMessage(
-      STAFF_GROUP_ID,
-      `📥 **Transferred Submission**\n• Student ID: \`${targetUserId}\`\n• Transferred to Department: **${newDept}**\n• Transferred by: **${staffName}**`,
-      { message_thread_id: newTopicId, parse_mode: 'Markdown', reply_markup: actionKeyboard }
-    );
-  } catch (err) {
-    console.error("Failed to post transfer card:", err);
-  }
-
   await ctx.editMessageText(
-    `🔄 Student receipt transferred to **${newDept}** by **${staffName}**.`,
+    `🔄 Student receipt successfully transferred to **${newDept}** by **${staffName}**.`,
     { parse_mode: 'Markdown' }
   );
 });
@@ -272,11 +262,13 @@ bot.on('message', async (ctx) => {
 
     try {
       const topicId = await getOrCreateDepartmentTopic(ctx, chosenDept);
-      stmtSaveTicket.run(userId, topicId, chosenDept);
 
-      await ctx.api.copyMessage(STAFF_GROUP_ID, ctx.chat.id, ctx.message.message_id, {
+      const forwardRes = await ctx.api.copyMessage(STAFF_GROUP_ID, ctx.chat.id, ctx.message.message_id, {
         message_thread_id: topicId
       });
+
+      const forwardedMsgId = forwardRes.message_id;
+      stmtSaveTicket.run(userId, topicId, forwardedMsgId, chosenDept);
 
       const actionKeyboard = new InlineKeyboard()
         .text("✅ Approve", `app_${userId}_${topicId}`).row()
