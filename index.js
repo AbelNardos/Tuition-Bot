@@ -26,6 +26,15 @@ const STAFF_GROUP_ID = String(process.env.STAFF_GROUP_ID || '').trim();
 const APPROVED_THREAD_ID = process.env.APPROVED_THREAD_ID ? Number(process.env.APPROVED_THREAD_ID) : null;
 const REJECTED_THREAD_ID = process.env.REJECTED_THREAD_ID ? Number(process.env.REJECTED_THREAD_ID) : null;
 
+// Global process crash prevention handlers
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception thrown:', err);
+});
+
 // PostgreSQL Connection
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -79,7 +88,7 @@ function getTransferKeyboard(userId) {
     .text("🎓 4-Year Complete Tuition", `tr_${userId}_4-Year Complete Tuition`);
 }
 
-bot.catch((err) => console.error('Error in bot:', err));
+bot.catch((err) => console.error('Error in bot framework:', err));
 
 async function getOrCreateDepartmentTopic(ctx, department) {
   const cached = await pool.query('SELECT topic_id FROM department_topics WHERE department = $1', [department]);
@@ -390,8 +399,7 @@ bot.callbackQuery(/^trans_(\d+)$/, async (ctx) => {
   });
 });
 
-// Express Webhook Handling for Render Deployment
-app.use(express.json());
+// Express Webhook Handling
 app.use('/webhook', webhookCallback(bot, 'express'));
 
 app.get('/', (req, res) => {
@@ -400,8 +408,17 @@ app.get('/', (req, res) => {
 
 async function main() {
   await initDB();
+
+  // Automatically register webhook URL on Render startup
+  const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL; 
+  if (RENDER_EXTERNAL_URL) {
+    const webhookUrl = `${RENDER_EXTERNAL_URL}/webhook`;
+    await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
+    console.log(`Webhook successfully bound to: ${webhookUrl}`);
+  }
+
   app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`Server listening on port ${PORT}`);
     console.log("Tuition Receipt Bot is online and ready!");
   });
 }
