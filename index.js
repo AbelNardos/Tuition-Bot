@@ -321,6 +321,7 @@ bot.on('message', async (ctx) => {
         { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: actionKeyboard }
       );
 
+      // Save to database AFTER messages are sent so IDs are captured properly
       await pool.query(`
         INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, department, status) 
         VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
@@ -330,7 +331,7 @@ bot.on('message', async (ctx) => {
       await ctx.reply("✅ Your receipt has been sent to the staff review team. We will notify you once verified.", { parse_mode: 'Markdown' });
     } catch (err) {
       console.error("Failed to forward receipt:", err);
-      return ctx.reply("Error submitting receipt. Please try again later.");
+      return ctx.reply(`❌ Error submitting receipt: ${err.message}`);
     }
   } 
   else if (isStaffGroup) {
@@ -356,7 +357,11 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
   await ctx.answerCallbackQuery();
-  await pool.query("UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND topic_id = $3", [staffName, userId, topicId]);
+  const updateRes = await pool.query("UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND topic_id = $3", [staffName, userId, topicId]);
+  
+  if (updateRes.rowCount === 0) {
+    return ctx.reply("⚠️ Error: Could not find a matching ticket record in the database for this action.", { message_thread_id: topicId });
+  }
 
   await ctx.api.sendMessage(
     userId,
@@ -378,7 +383,11 @@ bot.callbackQuery(/^rej_(\d+)_(\d+)$/, async (ctx) => {
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
   await ctx.answerCallbackQuery();
-  await pool.query("UPDATE tickets SET status = 'REJECTED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND topic_id = $3", [staffName, userId, topicId]);
+  const updateRes = await pool.query("UPDATE tickets SET status = 'REJECTED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND topic_id = $3", [staffName, userId, topicId]);
+
+  if (updateRes.rowCount === 0) {
+    return ctx.reply("⚠️ Error: Could not find a matching ticket record in the database for this action.", { message_thread_id: topicId });
+  }
 
   const resubmitKeyboard = new InlineKeyboard().text("🔄 Re-upload Receipt", "start_resubmit");
 
