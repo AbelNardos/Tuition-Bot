@@ -10,38 +10,51 @@ app.listen(port, '0.0.0.0', () => {
   console.log(`Web server listening on port ${port}`);
 });
 require('dotenv').config();
-const { Bot, InlineKeyboard, InputFile } = require('grammy');
-const Database = require('better-sqlite3');
+const express = require('express');
+const { Bot, InlineKeyboard, InputFile, webhookCallback } = require('grammy');
+const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 
+const app = express();
+app.use(express.json());
+
+const PORT = process.env.PORT || 10000;
 const bot = new Bot(process.env.BOT_TOKEN);
 
-const STAFF_GROUP_ID = String(process.env.STAFF_GROUP_ID).trim();
-const APPROVED_THREAD_ID = process.env.APPROVED_THREAD_ID ? Number(process.env.APPROVED_THREAD_ID) : 0;
-const REJECTED_THREAD_ID = process.env.REJECTED_THREAD_ID ? Number(process.env.REJECTED_THREAD_ID) : 0;
+const STAFF_GROUP_ID = String(process.env.STAFF_GROUP_ID || '').trim();
+const APPROVED_THREAD_ID = process.env.APPROVED_THREAD_ID ? Number(process.env.APPROVED_THREAD_ID) : null;
+const REJECTED_THREAD_ID = process.env.REJECTED_THREAD_ID ? Number(process.env.REJECTED_THREAD_ID) : null;
 
-const db = new Database('tickets.db');
+// PostgreSQL Connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS tickets (
-    user_id INTEGER,
-    topic_id INTEGER,
-    message_id INTEGER,
-    ticket_msg_id INTEGER,
-    department TEXT,
-    status TEXT DEFAULT 'PENDING',
-    rejection_reason TEXT,
-    processed_by TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+async function initDB() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tickets (
+      user_id BIGINT,
+      username TEXT,
+      receipt_file_id TEXT,
+      topic_id BIGINT,
+      message_id BIGINT,
+      ticket_msg_id BIGINT,
+      department TEXT,
+      status TEXT DEFAULT 'PENDING',
+      rejection_reason TEXT,
+      processed_by TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
 
-  CREATE TABLE IF NOT EXISTS department_topics (
-    department TEXT PRIMARY KEY,
-    topic_id INTEGER
-  );
-`);
+    CREATE TABLE IF NOT EXISTS department_topics (
+      department TEXT PRIMARY KEY,
+      topic_id BIGINT
+    );
+  `);
+}
 
 const pendingDepartments = new Map();
 
@@ -56,8 +69,7 @@ const DEPARTMENTS = [
 ];
 
 function getTransferKeyboard(userId) {
-  const keyboard = new InlineKeyboard();
-  keyboard
+  return new InlineKeyboard()
     .text("📈 Marketing Mgmt", `tr_${userId}_Marketing Management`)
     .text("💼 Business Mgmt", `tr_${userId}_Business Management`).row()
     .text("🌾 Agribusiness & VCM", `tr_${userId}_Agribusiness and Value chain management`)
@@ -65,74 +77,68 @@ function getTransferKeyboard(userId) {
     .text("📊 Accounting & Finance", `tr_${userId}_Accounting and finance`)
     .text("🚚 Logistics & SCM", `tr_${userId}_Logistics and Supply chain management`).row()
     .text("🎓 4-Year Complete Tuition", `tr_${userId}_4-Year Complete Tuition`);
-  return keyboard;
 }
-
-const stmtSaveTicket = db.prepare(`
-  INSERT INTO tickets (user_id, topic_id, message_id, ticket_msg_id, department, status) 
-  VALUES (?, ?, ?, ?, ?, 'PENDING')
-`);
 
 bot.catch((err) => console.error('Error in bot:', err));
 
 async function getOrCreateDepartmentTopic(ctx, department) {
-  const cached = db.prepare('SELECT topic_id FROM department_topics WHERE department = ?').get(department);
-  if (cached) {
-    return cached.topic_id;
+  const cached = await pool.query('SELECT topic_id FROM department_topics WHERE department = $1', [department]);
+  if (cached.rows.length > 0) {
+    return Number(cached.rows[0].topic_id);
   }
 
   const newTopic = await ctx.api.createForumTopic(STAFF_GROUP_ID, `📁 [${department}]`);
   const topicId = newTopic.message_thread_id;
 
-  db.prepare(`
+  await pool.query(`
     INSERT INTO department_topics (department, topic_id) 
-    VALUES (?, ?) 
-    ON CONFLICT(department) DO UPDATE SET topic_id = excluded.topic_id
-  `).run(department, topicId);
+    VALUES ($1, $2) 
+    ON CONFLICT(department) DO UPDATE SET topic_id = EXCLUDED.topic_id
+  `, [department, topicId]);
 
   return topicId;
 }
 
-function getApprovedByDepartmentText() {
+async function getApprovedByDepartmentText() {
   let output = "📂 **MASTER APPROVED RECEIPTS REPORT**\n\n";
-  DEPARTMENTS.forEach((dept) => {
-    const records = db.prepare(`
+  for (const dept of DEPARTMENTS) {
+    const res = await pool.query(`
       SELECT user_id, processed_by, updated_at 
       FROM tickets 
-      WHERE status = 'APPROVED' AND department = ?
+      WHERE status = 'APPROVED' AND department = $1
       ORDER BY updated_at DESC
-    `).all(dept);
+    `, [dept]);
 
-    output += `📂 **${dept}** (${records.length})\n`;
-    if (records.length === 0) {
+    output += `📂 **${dept}** (${res.rows.length})\n`;
+    if (res.rows.length === 0) {
       output += `  └ _No approved receipts yet_\n\n`;
     } else {
-      records.forEach((r) => {
+      res.rows.forEach((r) => {
         const staff = r.processed_by ? ` (Approved by: ${r.processed_by})` : "";
         output += `  ├ User ID: \`${r.user_id}\`${staff}\n`;
       });
       output += `\n`;
     }
-  });
+  }
   return output;
 }
 
-function generateSummaryText(statusType) {
-  const rows = db.prepare(`
+async function generateSummaryText(statusType) {
+  const res = await pool.query(`
     SELECT department, COUNT(*) as count 
     FROM tickets 
-    WHERE status = ? 
+    WHERE status = $1 
     GROUP BY department 
     ORDER BY department ASC
-  `).all(statusType);
+  `, [statusType]);
 
   const icon = statusType === 'APPROVED' ? '✅' : '❌';
   let text = `📊 **${icon} ${statusType} RECEIPTS SUMMARY**\n\n`;
-  if (rows.length === 0) {
+  if (res.rows.length === 0) {
     text += `_No ${statusType.toLowerCase()} receipts recorded yet._`;
     return text;
   }
-  rows.forEach((r) => {
+  res.rows.forEach((r) => {
     text += `• **${r.department}**: ${r.count} student(s)\n`;
   });
   return text;
@@ -140,21 +146,22 @@ function generateSummaryText(statusType) {
 
 async function sendCSVExport(threadId, captionText) {
   try {
-    const records = db.prepare(`
-      SELECT user_id, department, status, rejection_reason, processed_by, created_at, updated_at 
+    const res = await pool.query(`
+      SELECT user_id, username, department, status, rejection_reason, processed_by, created_at, updated_at 
       FROM tickets 
       ORDER BY department ASC, status ASC, updated_at DESC
-    `).all();
+    `);
 
-    if (records.length === 0) {
+    if (res.rows.length === 0) {
       return bot.api.sendMessage(STAFF_GROUP_ID, "⚠️ No receipts found to export.", { message_thread_id: threadId });
     }
 
-    let csv = "Student Telegram ID,Department,Status,Rejection Reason,Processed By,Created At,Updated At\n";
-    records.forEach((r) => {
+    let csv = "Student Telegram ID,Username,Department,Status,Rejection Reason,Processed By,Created At,Updated At\n";
+    res.rows.forEach((r) => {
+      const uname = r.username ? `"${r.username.replace(/"/g, '""')}"` : "";
       const reason = r.rejection_reason ? `"${r.rejection_reason.replace(/"/g, '""')}"` : "";
       const staff = r.processed_by ? `"${r.processed_by.replace(/"/g, '""')}"` : "";
-      csv += `${r.user_id},"${r.department}",${r.status},${reason},${staff},${r.created_at},${r.updated_at}\n`;
+      csv += `${r.user_id},${uname},"${r.department}",${r.status},${reason},${staff},${r.created_at},${r.updated_at}\n`;
     });
 
     const filePath = path.join(__dirname, 'receipts_audit.csv');
@@ -219,12 +226,13 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
 
   await ctx.answerCallbackQuery();
 
-  const ticket = db.prepare('SELECT topic_id, message_id, ticket_msg_id FROM tickets WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1').get(targetUserId);
+  const ticketRes = await pool.query('SELECT topic_id, message_id, ticket_msg_id FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1', [targetUserId]);
 
-  if (ticket) {
+  if (ticketRes.rows.length > 0) {
+    const ticket = ticketRes.rows[0];
     if (ticket.ticket_msg_id) {
       try {
-        await ctx.api.deleteMessage(STAFF_GROUP_ID, ticket.ticket_msg_id);
+        await ctx.api.deleteMessage(STAFF_GROUP_ID, Number(ticket.ticket_msg_id));
       } catch (e) {
         console.error("Could not delete old ticket message:", e);
       }
@@ -233,7 +241,7 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
     const newTopicId = await getOrCreateDepartmentTopic(ctx, newDept);
 
     try {
-      await ctx.api.copyMessage(STAFF_GROUP_ID, STAFF_GROUP_ID, ticket.message_id, {
+      await ctx.api.copyMessage(STAFF_GROUP_ID, STAFF_GROUP_ID, Number(ticket.message_id), {
         message_thread_id: newTopicId
       });
 
@@ -248,7 +256,11 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
         { message_thread_id: newTopicId, parse_mode: 'Markdown', reply_markup: actionKeyboard }
       );
 
-      db.prepare('UPDATE tickets SET department = ?, topic_id = ?, ticket_msg_id = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1').run(newDept, newTopicId, newTicketMsg.message_id, targetUserId);
+      await pool.query(`
+        UPDATE tickets 
+        SET department = $1, topic_id = $2, ticket_msg_id = $3, updated_at = CURRENT_TIMESTAMP 
+        WHERE user_id = $4
+      `, [newDept, newTopicId, newTicketMsg.message_id, targetUserId]);
 
     } catch (e) {
       console.error("Error moving message during transfer:", e);
@@ -269,7 +281,9 @@ bot.on('message', async (ctx) => {
 
   if (!isStaffGroup) {
     const userId = ctx.from.id;
+    const username = ctx.from.username || ctx.from.first_name || 'Unknown';
     const chosenDept = pendingDepartments.get(userId) || "4-Year Complete Tuition";
+    const fileId = ctx.message.photo ? ctx.message.photo[ctx.message.photo.length - 1].file_id : null;
 
     try {
       const topicId = await getOrCreateDepartmentTopic(ctx, chosenDept);
@@ -286,11 +300,14 @@ bot.on('message', async (ctx) => {
 
       const sentTicketMsg = await ctx.api.sendMessage(
         STAFF_GROUP_ID,
-        `📥 **New Submission**\n• Student ID: \`${userId}\`\n• Department: **${chosenDept}**`,
+        `📥 **New Submission**\n• Student ID: \`${userId}\`\n• Username: @${username}\n• Department: **${chosenDept}**`,
         { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: actionKeyboard }
       );
 
-      stmtSaveTicket.run(userId, topicId, forwardedMsgId, sentTicketMsg.message_id, chosenDept);
+      await pool.query(`
+        INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, department, status) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
+      `, [userId, username, fileId, topicId, forwardedMsgId, sentTicketMsg.message_id, chosenDept]);
 
       pendingDepartments.delete(userId);
       await ctx.reply("✅ Your receipt has been sent to the staff review team. We will notify you once verified.", { parse_mode: 'Markdown' });
@@ -305,8 +322,8 @@ bot.on('message', async (ctx) => {
     const lowerText = text.toLowerCase();
 
     if (lowerText === 'stats' || lowerText === '/stats') {
-      const appSummary = generateSummaryText('APPROVED');
-      const rejSummary = generateSummaryText('REJECTED');
+      const appSummary = await generateSummaryText('APPROVED');
+      const rejSummary = await generateSummaryText('REJECTED');
       return ctx.reply(`${appSummary}\n\n---\n\n${rejSummary}`, { message_thread_id: topicId, parse_mode: 'Markdown' });
     }
 
@@ -322,7 +339,7 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
   await ctx.answerCallbackQuery();
-  db.prepare("UPDATE tickets SET status = 'APPROVED', processed_by = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND topic_id = ?").run(staffName, userId, topicId);
+  await pool.query("UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND topic_id = $3", [staffName, userId, topicId]);
 
   await ctx.api.sendMessage(
     userId,
@@ -333,7 +350,7 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   await ctx.editMessageText(`✅ Receipt approved by **${staffName}**.`, { parse_mode: 'Markdown' });
 
   if (APPROVED_THREAD_ID) {
-    const sortedReport = getApprovedByDepartmentText();
+    const sortedReport = await getApprovedByDepartmentText();
     await ctx.api.sendMessage(STAFF_GROUP_ID, sortedReport, { message_thread_id: APPROVED_THREAD_ID, parse_mode: 'Markdown' });
   }
 });
@@ -344,7 +361,7 @@ bot.callbackQuery(/^rej_(\d+)_(\d+)$/, async (ctx) => {
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
   await ctx.answerCallbackQuery();
-  db.prepare("UPDATE tickets SET status = 'REJECTED', processed_by = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND topic_id = ?").run(staffName, userId, topicId);
+  await pool.query("UPDATE tickets SET status = 'REJECTED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND topic_id = $3", [staffName, userId, topicId]);
 
   const resubmitKeyboard = new InlineKeyboard().text("🔄 Re-upload Receipt", "start_resubmit");
 
@@ -373,10 +390,20 @@ bot.callbackQuery(/^trans_(\d+)$/, async (ctx) => {
   });
 });
 
+// Express Webhook Handling for Render Deployment
+app.use(express.json());
+app.use('/webhook', webhookCallback(bot, 'express'));
+
+app.get('/', (req, res) => {
+  res.send('Tuition Receipt Bot is active');
+});
+
 async function main() {
-  await bot.api.deleteWebhook({ drop_pending_updates: true });
-  console.log("Tuition Receipt Bot is online and ready!");
-  bot.start();
+  await initDB();
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log("Tuition Receipt Bot is online and ready!");
+  });
 }
 
 main();
