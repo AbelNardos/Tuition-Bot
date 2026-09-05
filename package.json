@@ -12,10 +12,10 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "better-sqlite3": "^13.0.3",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "grammy": "^1.46.0",
-    "node-telegram-bot-api": "^2.1.0"
+    "node-telegram-bot-api": "^2.1.0",
+    "pg": "^8.23.0"
   }
 }
