@@ -294,7 +294,13 @@ bot.on('message', async (ctx) => {
     const userId = ctx.from.id;
     const username = ctx.from.username || ctx.from.first_name || 'Unknown';
     const chosenDept = pendingDepartments.get(userId) || "4-Year Complete Tuition";
-    const fileId = ctx.message.photo ? ctx.message.photo[ctx.message.photo.length - 1].file_id : null;
+    
+    const fileId = ctx.message.photo ? ctx.message.photo[ctx.message.photo.length - 1].file_id : (ctx.message.document ? ctx.message.document.file_id : null);
+
+    if (!fileId) {
+      await ctx.reply("⚠️ Please send an actual **photo or screenshot** of your payment receipt. Text-only messages cannot be processed as receipts.", { parse_mode: 'Markdown' });
+      return;
+    }
 
     try {
       const topicId = await getOrCreateDepartmentTopic(ctx, chosenDept);
