@@ -4,6 +4,7 @@ const { Bot, InlineKeyboard, InputFile, webhookCallback } = require('grammy');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 
 const app = express();
 app.use(express.json());
@@ -23,6 +24,18 @@ process.on('unhandledRejection', (reason, promise) => {
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception thrown:', err);
 });
+
+// Solution 1: Internal Self-Ping Service (Keeps Render instance warm)
+setInterval(() => {
+  const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
+  if (RENDER_URL) {
+    https.get(`${RENDER_URL}/`, (res) => {
+      console.log(`Keep-alive ping status: ${res.statusCode}`);
+    }).on('error', (err) => {
+      console.error('Keep-alive ping error:', err.message);
+    });
+  }
+}, 8 * 60 * 1000); // Self-pings every 8 minutes
 
 // PostgreSQL Connection
 const pool = new Pool({
@@ -79,6 +92,13 @@ const DEPARTMENTS = [
   "4-Year Complete Tuition"
 ];
 
+const REJECTION_REASONS = [
+  { label: "📷 Blurry/Unreadable Receipt", code: "blurry" },
+  { label: "💵 Incorrect Amount Paid", code: "amount" },
+  { label: "🚫 Invalid/Fake Receipt", code: "invalid" },
+  { label: "👤 Name/ID Mismatch", code: "mismatch" }
+];
+
 function getTransferKeyboard(userId) {
   return new InlineKeyboard()
     .text("📈 Marketing Mgmt", `tr_${userId}_Marketing Management`)
@@ -88,6 +108,14 @@ function getTransferKeyboard(userId) {
     .text("📊 Accounting & Finance", `tr_${userId}_Accounting and finance`)
     .text("🚚 Logistics & SCM", `tr_${userId}_Logistics and Supply chain management`).row()
     .text("🎓 4-Year Complete Tuition", `tr_${userId}_4-Year Complete Tuition`);
+}
+
+function getRejectionReasonKeyboard(userId, topicId) {
+  const kb = new InlineKeyboard();
+  REJECTION_REASONS.forEach((r) => {
+    kb.text(r.label, `confirmrej_${userId}_${topicId}_${r.code}`).row();
+  });
+  return kb;
 }
 
 bot.catch((err) => console.error('Error in bot framework:', err));
@@ -208,6 +236,46 @@ bot.command('start', async (ctx) => {
   );
 });
 
+bot.command('status', async (ctx) => {
+  const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
+  if (isStaffGroup) return;
+
+  const userId = ctx.from.id;
+  const res = await pool.query(
+    'SELECT department, status, rejection_reason, updated_at FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1',
+    [userId]
+  );
+
+  if (res.rows.length === 0) {
+    return ctx.reply("ℹ️ You have not submitted any payment receipts yet. Use /start to begin a submission.", { parse_mode: 'Markdown' });
+  }
+
+  const ticket = res.rows[0];
+  let statusEmoji = "⏳";
+  let statusText = "Pending Review";
+
+  if (ticket.status === 'APPROVED') {
+    statusEmoji = "✅";
+    statusText = "Approved";
+  } else if (ticket.status === 'REJECTED') {
+    statusEmoji = "❌";
+    statusText = "Rejected";
+  }
+
+  let msg = `📋 **Your Payment Status**\n\n`;
+  msg += `• **Department:** ${ticket.department}\n`;
+  msg += `• **Status:** ${statusEmoji} **${statusText}**\n`;
+  
+  if (ticket.status === 'REJECTED' && ticket.rejection_reason) {
+    msg += `• **Reason:** ${ticket.rejection_reason}\n`;
+    msg += `\nType /start or re-upload a clear receipt to resubmit.`;
+  } else if (ticket.status === 'PENDING') {
+    msg += `\nOur staff team is currently reviewing your receipt. We will notify you here once processed.`;
+  }
+
+  await ctx.reply(msg, { parse_mode: 'Markdown' });
+});
+
 bot.callbackQuery('start_resubmit', async (ctx) => {
   await ctx.answerCallbackQuery();
   pendingDepartments.delete(ctx.from.id);
@@ -273,7 +341,6 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
         WHERE user_id = $4
       `, [newDept, newTopicId, newTicketMsg.message_id, targetUserId]);
 
-      // NOTIFY THE STUDENT OF THE DEPARTMENT TRANSFER
       try {
         await ctx.api.sendMessage(
           targetUserId,
@@ -390,29 +457,47 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
 bot.callbackQuery(/^rej_(\d+)_(\d+)$/, async (ctx) => {
   const userId = Number(ctx.match[1]);
   const topicId = Number(ctx.match[2]);
-  const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
   await ctx.answerCallbackQuery();
-  const updateRes = await pool.query("UPDATE tickets SET status = 'REJECTED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND topic_id = $3", [staffName, userId, topicId]);
+  await ctx.reply(" Select rejection reason:", {
+    reply_markup: getRejectionReasonKeyboard(userId, topicId)
+  });
+});
+
+bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
+  const userId = Number(ctx.match[1]);
+  const topicId = Number(ctx.match[2]);
+  const reasonCode = ctx.match[3];
+  const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
+
+  const reasonObj = REJECTION_REASONS.find(r => r.code === reasonCode);
+  const reasonText = reasonObj ? reasonObj.label : "Receipt details unverified";
+
+  await ctx.answerCallbackQuery();
+
+  const updateRes = await pool.query(
+    "UPDATE tickets SET status = 'REJECTED', rejection_reason = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP WHERE user_id = $3 AND topic_id = $4",
+    [reasonText, staffName, userId, topicId]
+  );
 
   if (updateRes.rowCount === 0) {
-    return ctx.reply("⚠️ Error: Could not find a matching ticket record in the database for this action.", { message_thread_id: topicId });
+    return ctx.reply("⚠️ Error: Could not find a matching ticket record in the database.", { message_thread_id: topicId });
   }
 
   const resubmitKeyboard = new InlineKeyboard().text("🔄 Re-upload Receipt", "start_resubmit");
 
   await ctx.api.sendMessage(
     userId,
-    `❌ **Receipt Rejected**\n\nPlease click below to upload a clear screenshot or receipt photo.`,
+    `❌ **Receipt Rejected**\n\n**Reason:** ${reasonText}\n\nPlease click below to re-upload a clear and valid payment receipt.`,
     { parse_mode: 'Markdown', reply_markup: resubmitKeyboard }
   );
 
-  await ctx.editMessageText(`❌ Receipt rejected by **${staffName}**.`, { parse_mode: 'Markdown' });
+  await ctx.editMessageText(`❌ Receipt rejected by **${staffName}**.\n**Reason:** ${reasonText}`, { parse_mode: 'Markdown' });
 
   if (REJECTED_THREAD_ID) {
     await ctx.api.sendMessage(
       STAFF_GROUP_ID,
-      `❌ **REJECTED RECEIPT**\n• Student ID: \`${userId}\`\n• Staff: **${staffName}**`,
+      `❌ **REJECTED RECEIPT**\n• Student ID: \`${userId}\`\n• Staff: **${staffName}**\n• Reason: ${reasonText}`,
       { message_thread_id: REJECTED_THREAD_ID, parse_mode: 'Markdown' }
     );
   }
