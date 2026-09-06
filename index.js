@@ -25,7 +25,7 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception thrown:', err);
 });
 
-// Solution 1: Internal Self-Ping Service (Keeps Render instance warm)
+// Internal Self-Ping Service (Keeps Render instance warm)
 setInterval(() => {
   const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
   if (RENDER_URL) {
@@ -81,6 +81,7 @@ async function initDB() {
 }
 
 const pendingDepartments = new Map();
+const userLanguages = new Map(); // Stores userId -> 'en' | 'am'
 
 const DEPARTMENTS = [
   "Marketing Management",
@@ -92,27 +93,59 @@ const DEPARTMENTS = [
   "4-Year Complete Tuition"
 ];
 
-// Rejection Reasons with Context-Specific Guidance
+// Localized UI Dictionary
+const STRINGS = {
+  en: {
+    welcome: "👋 **Welcome to the Tuition Payment Portal!**\n\nPlease select your **Department** below before sending your receipt and details:",
+    selectDept: "Please select your department:",
+    receiptReceived: "✅ Your receipt has been sent to the staff review team. We will notify you once verified.",
+    sendReceiptPrompt: "✅ Selected Department: **{dept}**\n\nNow, please send your receipt photo or screenshot with your Full Name and Student ID.",
+    reuploadPrompt: "🔄 **Re-submitting Receipt**\nPlease choose your department to initiate a new submission:",
+    approvedMsg: "✅ **Receipt Verified!**\nYour payment submission has been approved. Thank you!",
+    rejectedMsg: "❌ **Receipt Rejected**\n\n**Reason:** {reason}\n\n{message}",
+    reuploadBtn: "🔄 Re-upload Receipt",
+    noFileErr: "⚠️ Please send an actual **photo or screenshot** of your payment receipt. Text-only messages cannot be processed as receipts.",
+    deptUpdated: "🔄 **Department Updated**\nYour receipt submission has been transferred to **{dept}**. Our review team will process your payment under this department."
+  },
+  am: {
+    welcome: "👋 **እንኳን ወደ ክፍያ መላኪያ ቦት በሰላም መጡ!**\n\nእባክዎን ደረሰኝዎን ከመላክዎ በፊት **ትምህርት ክፍልዎን (Department)** ይምረጡ፡",
+    selectDept: "እባክዎን ትምህርት ክፍልዎን ይምረጡ፡",
+    receiptReceived: "✅ ደረሰኝዎ ለክትትል ቡድኑ ተልኳል። እንደተረጋገጠ እናሳውቅዎታለን።",
+    sendReceiptPrompt: "✅ የተመረጠው ትምህርት ክፍል፡ **{dept}**\n\nአሁን እባክዎን የክፍያ ደረሰኝ ፎቶዎን ከሙሉ ስምዎ እና የተማሪ ID ጋር ይላኩ።",
+    reuploadPrompt: "🔄 **ደረሰኝ እንደገና መላክ**\nእባክዎን አዲስ ማመልከቻ ለመጀመር ትምህርት ክፍልዎን ይምረጡ፡",
+    approvedMsg: "✅ **ደረሰኝዎ ተረጋግጧል!**\nየክፍያ ማረጋገጫዎ ጸድቋል። እናመሰግናለን!",
+    rejectedMsg: "❌ **ደረሰኝዎ ውድቅ ተደርጓል**\n\n**ምክንያት:** {reason}\n\n{message}",
+    reuploadBtn: "🔄 ደረሰኝ እንደገና ስቀል",
+    noFileErr: "⚠️ እባክዎን ትክክለኛ የክፍያ ደረሰኝ **ፎቶ ወይም ስክሪንሾት** ይላኩ። በጽሁፍ ብቻ የሚላክ መረጃ አይቀበልም።",
+    deptUpdated: "🔄 **ትምህርት ክፍል ተቀይሯል**\nየደረሰኝ ማመልከቻዎ ወደ **{dept}** ተዛውሯል። መረጃዎ በዚህ ትምህርት ክፍል ስር የሚታይ ይሆናል።"
+  }
+};
+
+// Rejection Reasons with Context-Specific Guidance in EN & AM
 const REJECTION_REASONS = [
   { 
     label: "📷 Blurry/Unreadable Receipt", 
     code: "blurry",
-    message: "Please ensure your receipt image is clear, fully visible, and uncropped, then click below to re-upload."
+    message_en: "Please ensure your receipt image is clear, fully visible, and uncropped, then click below to re-upload.",
+    message_am: "እባክዎን የደረሰኝዎ ፎቶ ግልጽ፣ ሙሉ በሙሉ የሚታይ እና ያልተቆረጠ መሆኑን አረጋግጠው እንደገና ይላኩ።"
   },
   { 
     label: "💵 Incorrect Amount Paid", 
     code: "amount",
-    message: "The payment amount does not match your required tuition fees. Please verify your transaction details and re-upload the correct receipt."
+    message_en: "The payment amount does not match your required tuition fees. Please verify your transaction details and re-upload the correct receipt.",
+    message_am: "የተከፈለው የገንዘብ መጠን ከተፈለገው የትምህርት ክፍያ ጋር አይመሳሰልም። እባክዎን የትራንዛክሽን መረጃዎን አረጋግጠው ትክክለኛውን ደረሰኝ ይላኩ።"
   },
   { 
     label: "🚫 Invalid/Fake Receipt", 
     code: "invalid",
-    message: "This receipt could not be verified by our finance team. Please submit an official bank transaction receipt."
+    message_en: "This receipt could not be verified by our finance team. Please submit an official bank transaction receipt.",
+    message_am: "ይህ ደረሰኝ በገንዘብ ያዥ ቡድኑ ሊረጋገጥ አልቻለም። እባክዎን ኦፊሴላዊ የባንክ ደረሰኝ ይላኩ።"
   },
   { 
     label: "👤 Name/ID Mismatch", 
     code: "mismatch",
-    message: "The name or Student ID on the receipt does not match your profile details. Please re-upload a receipt that matches your credentials or contact administration."
+    message_en: "The name or Student ID on the receipt does not match your profile details. Please re-upload a receipt that matches your credentials or contact administration.",
+    message_am: "በደረሰኙ ላይ ያለው ስም ወይም የተማሪ መታወቂያ ከተመዘገበው መረጃ ጋር አይመሳሰልም። እባክዎን ትክክለኛ መረጃ ያለው ደረሰኝ ይላኩ ወይም የአስተዳደር ክፍሉን ያነጋግሩ።"
   }
 ];
 
@@ -247,8 +280,26 @@ function getDepartmentKeyboard() {
 
 bot.command('start', async (ctx) => {
   pendingDepartments.delete(ctx.from.id);
+
+  const langKeyboard = new InlineKeyboard()
+    .text("🇬🇧 English", "lang_en")
+    .text("🇪🇹 አማርኛ", "lang_am");
+
   await ctx.reply(
-    "👋 **Welcome to the Tuition Payment Portal!**\n\nPlease select your **Department** below before sending your receipt and details:",
+    "🌐 **Please select your language / እባክዎን ቋንቋ ይምረጡ:**",
+    { parse_mode: 'Markdown', reply_markup: langKeyboard }
+  );
+});
+
+bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
+  const lang = ctx.match[1];
+  userLanguages.set(ctx.from.id, lang);
+
+  await ctx.answerCallbackQuery();
+
+  const t = STRINGS[lang];
+  await ctx.editMessageText(
+    t.welcome,
     { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard() }
   );
 });
@@ -258,36 +309,44 @@ bot.command('status', async (ctx) => {
   if (isStaffGroup) return;
 
   const userId = ctx.from.id;
+  const lang = userLanguages.get(userId) || 'en';
+
   const res = await pool.query(
     'SELECT department, status, rejection_reason, updated_at FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1',
     [userId]
   );
 
   if (res.rows.length === 0) {
-    return ctx.reply("ℹ️ You have not submitted any payment receipts yet. Use /start to begin a submission.", { parse_mode: 'Markdown' });
+    const noSubMsg = lang === 'am' 
+      ? "ℹ️ እስከ አሁን ምንም ደረሰኝ አላስገቡም። ለማስገባት /start ን ይጫኑ።"
+      : "ℹ️ You have not submitted any payment receipts yet. Use /start to begin a submission.";
+    return ctx.reply(noSubMsg, { parse_mode: 'Markdown' });
   }
 
   const ticket = res.rows[0];
   let statusEmoji = "⏳";
-  let statusText = "Pending Review";
+  let statusText = lang === 'am' ? "በመጠባበቅ ላይ" : "Pending Review";
 
   if (ticket.status === 'APPROVED') {
     statusEmoji = "✅";
-    statusText = "Approved";
+    statusText = lang === 'am' ? "ተረጋግጧል" : "Approved";
   } else if (ticket.status === 'REJECTED') {
     statusEmoji = "❌";
-    statusText = "Rejected";
+    statusText = lang === 'am' ? "ውድቅ ተደርጓል" : "Rejected";
   }
 
-  let msg = `📋 **Your Payment Status**\n\n`;
-  msg += `• **Department:** ${ticket.department}\n`;
-  msg += `• **Status:** ${statusEmoji} **${statusText}**\n`;
+  let msg = lang === 'am' 
+    ? `📋 **የክፍያዎ ሁኔታ**\n\n• **ትምህርት ክፍል:** ${ticket.department}\n• **ሁኔታ:** ${statusEmoji} **${statusText}**\n`
+    : `📋 **Your Payment Status**\n\n• **Department:** ${ticket.department}\n• **Status:** ${statusEmoji} **${statusText}**\n`;
   
   if (ticket.status === 'REJECTED' && ticket.rejection_reason) {
-    msg += `• **Reason:** ${ticket.rejection_reason}\n`;
-    msg += `\nType /start or re-upload a clear receipt to resubmit.`;
+    msg += lang === 'am' 
+      ? `• **ምክንያት:** ${ticket.rejection_reason}\n\nእባክዎን እንደገና ለመላክ /start ን ይጫኑ።`
+      : `• **Reason:** ${ticket.rejection_reason}\n\nType /start or re-upload a clear receipt to resubmit.`;
   } else if (ticket.status === 'PENDING') {
-    msg += `\nOur staff team is currently reviewing your receipt. We will notify you here once processed.`;
+    msg += lang === 'am' 
+      ? `\nየክትትል ቡድኑ ደረሰኝዎን እየገመገመ ነው። እንደተጠናቀቀ እናሳውቅዎታለን።`
+      : `\nOur staff team is currently reviewing your receipt. We will notify you here once processed.`;
   }
 
   await ctx.reply(msg, { parse_mode: 'Markdown' });
@@ -295,9 +354,13 @@ bot.command('status', async (ctx) => {
 
 bot.callbackQuery('start_resubmit', async (ctx) => {
   await ctx.answerCallbackQuery();
-  pendingDepartments.delete(ctx.from.id);
+  const userId = ctx.from.id;
+  const lang = userLanguages.get(userId) || 'en';
+  const t = STRINGS[lang];
+
+  pendingDepartments.delete(userId);
   await ctx.reply(
-    "🔄 **Re-submitting Receipt**\nPlease choose your department to initiate a new submission:",
+    t.reuploadPrompt,
     { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard() }
   );
 });
@@ -305,12 +368,14 @@ bot.callbackQuery('start_resubmit', async (ctx) => {
 bot.callbackQuery(/^dept_(.+)$/, async (ctx) => {
   const selectedDept = ctx.match[1];
   const userId = ctx.from.id;
+  const lang = userLanguages.get(userId) || 'en';
+  const t = STRINGS[lang];
   
   pendingDepartments.set(userId, selectedDept);
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    `✅ Selected Department: **${selectedDept}**\n\nNow, please send your receipt photo or screenshot with your Full Name and Student ID.`,
+    t.sendReceiptPrompt.replace('{dept}', selectedDept),
     { parse_mode: 'Markdown' }
   );
 });
@@ -359,9 +424,11 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
       `, [newDept, newTopicId, newTicketMsg.message_id, targetUserId]);
 
       try {
+        const studentLang = userLanguages.get(targetUserId) || 'en';
+        const t = STRINGS[studentLang];
         await ctx.api.sendMessage(
           targetUserId,
-          `🔄 **Department Updated**\nYour receipt submission has been transferred to **${newDept}**. Our review team will process your payment under this department.`,
+          t.deptUpdated.replace('{dept}', newDept),
           { parse_mode: 'Markdown' }
         );
       } catch (studentErr) {
@@ -389,11 +456,13 @@ bot.on('message', async (ctx) => {
     const userId = ctx.from.id;
     const username = ctx.from.username || ctx.from.first_name || 'Unknown';
     const chosenDept = pendingDepartments.get(userId) || "4-Year Complete Tuition";
+    const lang = userLanguages.get(userId) || 'en';
+    const t = STRINGS[lang];
     
     const fileId = ctx.message.photo ? ctx.message.photo[ctx.message.photo.length - 1].file_id : (ctx.message.document ? ctx.message.document.file_id : null);
 
     if (!fileId) {
-      await ctx.reply("⚠️ Please send an actual **photo or screenshot** of your payment receipt. Text-only messages cannot be processed as receipts.", { parse_mode: 'Markdown' });
+      await ctx.reply(t.noFileErr, { parse_mode: 'Markdown' });
       return;
     }
 
@@ -422,7 +491,7 @@ bot.on('message', async (ctx) => {
       `, [userId, username, fileId, topicId, forwardedMsgId, sentTicketMsg.message_id, chosenDept]);
 
       pendingDepartments.delete(userId);
-      await ctx.reply("✅ Your receipt has been sent to the staff review team. We will notify you once verified.", { parse_mode: 'Markdown' });
+      await ctx.reply(t.receiptReceived, { parse_mode: 'Markdown' });
     } catch (err) {
       console.error("Failed to forward receipt:", err);
       return ctx.reply(`❌ Error submitting receipt: ${err.message}`);
@@ -461,9 +530,12 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
     return ctx.reply("⚠️ Error: Could not find an active pending ticket record in the database for this user.", { message_thread_id: topicId });
   }
 
+  const lang = userLanguages.get(userId) || 'en';
+  const t = STRINGS[lang];
+
   await ctx.api.sendMessage(
     userId,
-    `✅ **Receipt Verified!**\nYour payment submission has been approved. Thank you!`,
+    t.approvedMsg,
     { parse_mode: 'Markdown' }
   );
 
@@ -491,9 +563,12 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   const reasonCode = ctx.match[3];
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
+  const lang = userLanguages.get(userId) || 'en';
+  const t = STRINGS[lang];
+
   const reasonObj = REJECTION_REASONS.find(r => r.code === reasonCode);
   const reasonText = reasonObj ? reasonObj.label : "Receipt details unverified";
-  const customMessage = reasonObj ? reasonObj.message : "Please re-upload a valid payment receipt.";
+  const customMessage = reasonObj ? (lang === 'am' ? reasonObj.message_am : reasonObj.message_en) : "Please re-upload a valid payment receipt.";
 
   await ctx.answerCallbackQuery();
 
@@ -508,11 +583,11 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
     return ctx.reply("⚠️ Error: Could not find an active pending ticket record for this user.", { message_thread_id: topicId });
   }
 
-  const resubmitKeyboard = new InlineKeyboard().text("🔄 Re-upload Receipt", "start_resubmit");
+  const resubmitKeyboard = new InlineKeyboard().text(t.reuploadBtn, "start_resubmit");
 
   await ctx.api.sendMessage(
     userId,
-    `❌ **Receipt Rejected**\n\n**Reason:** ${reasonText}\n\n${customMessage}`,
+    t.rejectedMsg.replace('{reason}', reasonText).replace('{message}', customMessage),
     { parse_mode: 'Markdown', reply_markup: resubmitKeyboard }
   );
 
