@@ -434,10 +434,15 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
   await ctx.answerCallbackQuery();
-  const updateRes = await pool.query("UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND topic_id = $3", [staffName, userId, topicId]);
+  
+  // FIX: Match active pending ticket by user_id
+  const updateRes = await pool.query(
+    "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING'",
+    [staffName, userId]
+  );
   
   if (updateRes.rowCount === 0) {
-    return ctx.reply("⚠️ Error: Could not find a matching ticket record in the database for this action.", { message_thread_id: topicId });
+    return ctx.reply("⚠️ Error: Could not find an active pending ticket record in the database for this user.", { message_thread_id: topicId });
   }
 
   await ctx.api.sendMessage(
@@ -459,7 +464,7 @@ bot.callbackQuery(/^rej_(\d+)_(\d+)$/, async (ctx) => {
   const topicId = Number(ctx.match[2]);
 
   await ctx.answerCallbackQuery();
-  await ctx.reply(" Select rejection reason:", {
+  await ctx.reply("Select rejection reason:", {
     reply_markup: getRejectionReasonKeyboard(userId, topicId)
   });
 });
@@ -475,13 +480,16 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
 
   await ctx.answerCallbackQuery();
 
+  // FIX: Match active pending ticket by user_id instead of strict topic_id matching
   const updateRes = await pool.query(
-    "UPDATE tickets SET status = 'REJECTED', rejection_reason = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP WHERE user_id = $3 AND topic_id = $4",
-    [reasonText, staffName, userId, topicId]
+    `UPDATE tickets 
+     SET status = 'REJECTED', rejection_reason = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP 
+     WHERE user_id = $3 AND status = 'PENDING'`,
+    [reasonText, staffName, userId]
   );
 
   if (updateRes.rowCount === 0) {
-    return ctx.reply("⚠️ Error: Could not find a matching ticket record in the database.", { message_thread_id: topicId });
+    return ctx.reply("⚠️ Error: Could not find an active pending ticket record for this user.", { message_thread_id: topicId });
   }
 
   const resubmitKeyboard = new InlineKeyboard().text("🔄 Re-upload Receipt", "start_resubmit");
