@@ -261,7 +261,6 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
         .text("❌ Reject", `rej_${targetUserId}_${newTopicId}`).row()
         .text("🔄 Transfer Dept", `trans_${targetUserId}`);
 
-      // Sent as plain text to avoid markdown parsing errors on usernames
       const newTicketMsg = await ctx.api.sendMessage(
         STAFF_GROUP_ID,
         `📥 New Transferred Submission\n• Student ID: ${targetUserId}\n• Department: ${newDept}\n• Transferred by: ${staffName}`,
@@ -273,6 +272,17 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
         SET department = $1, topic_id = $2, ticket_msg_id = $3, updated_at = CURRENT_TIMESTAMP 
         WHERE user_id = $4
       `, [newDept, newTopicId, newTicketMsg.message_id, targetUserId]);
+
+      // NOTIFY THE STUDENT OF THE DEPARTMENT TRANSFER
+      try {
+        await ctx.api.sendMessage(
+          targetUserId,
+          `🔄 **Department Updated**\nYour receipt submission has been transferred to **${newDept}**. Our review team will process your payment under this department.`,
+          { parse_mode: 'Markdown' }
+        );
+      } catch (studentErr) {
+        console.error("Could not send transfer notification to student:", studentErr);
+      }
 
     } catch (e) {
       console.error("Error moving message during transfer:", e);
@@ -316,7 +326,6 @@ bot.on('message', async (ctx) => {
         .text("❌ Reject", `rej_${userId}_${topicId}`).row()
         .text("🔄 Transfer Dept", `trans_${userId}`);
 
-      // Sent as plain text to prevent Markdown entity parsing crashes
       const sentTicketMsg = await ctx.api.sendMessage(
         STAFF_GROUP_ID,
         `📥 New Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${chosenDept}`,
