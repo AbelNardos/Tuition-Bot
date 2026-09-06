@@ -92,11 +92,28 @@ const DEPARTMENTS = [
   "4-Year Complete Tuition"
 ];
 
+// Rejection Reasons with Context-Specific Guidance
 const REJECTION_REASONS = [
-  { label: "📷 Blurry/Unreadable Receipt", code: "blurry" },
-  { label: "💵 Incorrect Amount Paid", code: "amount" },
-  { label: "🚫 Invalid/Fake Receipt", code: "invalid" },
-  { label: "👤 Name/ID Mismatch", code: "mismatch" }
+  { 
+    label: "📷 Blurry/Unreadable Receipt", 
+    code: "blurry",
+    message: "Please ensure your receipt image is clear, fully visible, and uncropped, then click below to re-upload."
+  },
+  { 
+    label: "💵 Incorrect Amount Paid", 
+    code: "amount",
+    message: "The payment amount does not match your required tuition fees. Please verify your transaction details and re-upload the correct receipt."
+  },
+  { 
+    label: "🚫 Invalid/Fake Receipt", 
+    code: "invalid",
+    message: "This receipt could not be verified by our finance team. Please submit an official bank transaction receipt."
+  },
+  { 
+    label: "👤 Name/ID Mismatch", 
+    code: "mismatch",
+    message: "The name or Student ID on the receipt does not match your profile details. Please re-upload a receipt that matches your credentials or contact administration."
+  }
 ];
 
 function getTransferKeyboard(userId) {
@@ -435,7 +452,6 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
 
   await ctx.answerCallbackQuery();
   
-  // FIX: Match active pending ticket by user_id
   const updateRes = await pool.query(
     "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING'",
     [staffName, userId]
@@ -477,10 +493,10 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
 
   const reasonObj = REJECTION_REASONS.find(r => r.code === reasonCode);
   const reasonText = reasonObj ? reasonObj.label : "Receipt details unverified";
+  const customMessage = reasonObj ? reasonObj.message : "Please re-upload a valid payment receipt.";
 
   await ctx.answerCallbackQuery();
 
-  // FIX: Match active pending ticket by user_id instead of strict topic_id matching
   const updateRes = await pool.query(
     `UPDATE tickets 
      SET status = 'REJECTED', rejection_reason = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP 
@@ -496,7 +512,7 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
 
   await ctx.api.sendMessage(
     userId,
-    `❌ **Receipt Rejected**\n\n**Reason:** ${reasonText}\n\nPlease click below to re-upload a clear and valid payment receipt.`,
+    `❌ **Receipt Rejected**\n\n**Reason:** ${reasonText}\n\n${customMessage}`,
     { parse_mode: 'Markdown', reply_markup: resubmitKeyboard }
   );
 
