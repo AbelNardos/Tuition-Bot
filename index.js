@@ -172,13 +172,13 @@ const REJECTION_REASONS = [
 
 function getDepartmentKeyboard() {
   return new InlineKeyboard()
-    .text("Marketing Management", "dept_Marketing Management").row()
-    .text("Business Management", "dept_Business Management").row()
-    .text("Agribusiness and Value chain management", "dept_Agribusiness and Value chain management").row()
-    .text("Educational planning and management", "dept_Educational planning and management").row()
-    .text("Accounting and finance", "dept_Accounting and finance").row()
-    .text("Logistics and Supply chain management", "dept_Logistics and Supply chain management").row()
-    .text("4-Year Complete Tuition", "dept_4-Year Complete Tuition");
+    .text("📈 Marketing", "dept_Marketing Management")
+    .text("💼 Business", "dept_Business Management").row()
+    .text("📊 Accounting & Finance", "dept_Accounting and finance").row()
+    .text("🌾 Agribusiness & VCM", "dept_Agribusiness and Value chain management").row()
+    .text("📚 Ed. Planning & Mgmt", "dept_Educational planning and management").row()
+    .text("🚚 Logistics & SCM", "dept_Logistics and Supply chain management").row()
+    .text("🎓 4-Year Complete Tuition", "dept_4-Year Complete Tuition");
 }
 
 function getStaffKeyboard() {
