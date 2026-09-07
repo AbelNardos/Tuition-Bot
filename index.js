@@ -356,7 +356,6 @@ bot.command('status', async (ctx) => {
   await ctx.reply(msg, { parse_mode: 'Markdown' });
 });
 
-// Student Payment History Command (/myhistory)
 bot.command('myhistory', async (ctx) => {
   const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
   if (isStaffGroup) return;
@@ -398,7 +397,6 @@ bot.command('myhistory', async (ctx) => {
   await ctx.reply(text, { parse_mode: 'Markdown' });
 });
 
-// Admin Broadcast Command (/broadcast <message>)
 bot.command('broadcast', async (ctx) => {
   const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
   if (!isStaffGroup) return;
@@ -426,6 +424,24 @@ bot.command('broadcast', async (ctx) => {
   }
 
   await ctx.reply(`✅ **Broadcast Complete**\n• Delivered: ${successCount}\n• Failed: ${failCount}`);
+});
+
+bot.command('stats', async (ctx) => {
+  const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
+  if (!isStaffGroup) return;
+
+  const topicId = ctx.message.message_thread_id;
+  const appSummary = await generateSummaryText('APPROVED');
+  const rejSummary = await generateSummaryText('REJECTED');
+  await ctx.reply(`${appSummary}\n\n---\n\n${rejSummary}`, { message_thread_id: topicId, parse_mode: 'Markdown' });
+});
+
+bot.command('export', async (ctx) => {
+  const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
+  if (!isStaffGroup) return;
+
+  const topicId = ctx.message.message_thread_id;
+  await sendCSVExport(topicId, "📄 **Receipt Audit Export**");
 });
 
 bot.callbackQuery('start_resubmit', async (ctx) => {
@@ -534,7 +550,6 @@ bot.on('message', async (ctx) => {
     const lang = userLanguages.get(userId) || 'en';
     const t = STRINGS[lang];
 
-    // Rate Limit Check: Block upload if user already has an active PENDING ticket
     const activeCheck = await pool.query(
       "SELECT 1 FROM tickets WHERE user_id = $1 AND status = 'PENDING' LIMIT 1",
       [userId]
@@ -593,13 +608,13 @@ bot.on('message', async (ctx) => {
     const text = (ctx.message.text || "").trim();
     const lowerText = text.toLowerCase();
 
-    if (lowerText === 'stats' || lowerText === '/stats') {
+    if (lowerText === 'stats') {
       const appSummary = await generateSummaryText('APPROVED');
       const rejSummary = await generateSummaryText('REJECTED');
       return ctx.reply(`${appSummary}\n\n---\n\n${rejSummary}`, { message_thread_id: topicId, parse_mode: 'Markdown' });
     }
 
-    if (lowerText === 'export' || lowerText === '/export') {
+    if (lowerText === 'export') {
       return sendCSVExport(topicId, "📄 **Receipt Audit Export**");
     }
   }
@@ -728,14 +743,29 @@ app.get('/', (req, res) => {
 async function main() {
   await initDB();
 
-  // Automatically register bot commands in Telegram's UI menu
+  // Register scope-specific bot commands in Telegram UI
   try {
-    await bot.api.setMyCommands([
-      { command: 'start', description: 'Start payment receipt submission' },
-      { command: 'status', description: 'Check your current submission status' },
-      { command: 'myhistory', description: 'View your payment submission history' }
-    ]);
-    console.log("Bot commands registered successfully with Telegram.");
+    // Private chats (Students)
+    await bot.api.setMyCommands(
+      [
+        { command: 'start', description: 'Start payment receipt submission' },
+        { command: 'status', description: 'Check your current submission status' },
+        { command: 'myhistory', description: 'View your payment submission history' }
+      ],
+      { scope: { type: 'all_private_chats' } }
+    );
+
+    // Group chats (Staff Group)
+    await bot.api.setMyCommands(
+      [
+        { command: 'broadcast', description: 'Send announcement to all students' },
+        { command: 'stats', description: 'View approval/rejection statistics' },
+        { command: 'export', description: 'Export student records CSV' }
+      ],
+      { scope: { type: 'all_group_chats' } }
+    );
+
+    console.log("Scoped bot commands registered successfully with Telegram.");
   } catch (cmdErr) {
     console.error("Failed to register bot commands:", cmdErr.message);
   }
