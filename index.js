@@ -803,6 +803,9 @@ async function main() {
   await initDB();
 
   try {
+    // Clear global scope commands to remove cached username prefixes
+    await bot.api.deleteMyCommands({ scope: { type: 'default' } });
+
     // Register private chat commands (for students)
     await bot.api.setMyCommands(
       [
@@ -824,9 +827,9 @@ async function main() {
       { scope: { type: 'all_group_chats' } }
     );
 
-    console.log("Scoped bot commands registered successfully with Telegram.");
+    console.log("Global commands cleared and scoped commands registered successfully.");
   } catch (cmdErr) {
-    console.error("Failed to register bot commands:", cmdErr.message);
+    console.error("Failed to update bot commands:", cmdErr.message);
   }
 
   const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL; 
