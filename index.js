@@ -426,6 +426,63 @@ bot.command('broadcast', async (ctx) => {
   await ctx.reply(`✅ **Broadcast Complete**\n• Delivered: ${successCount}\n• Failed: ${failCount}`);
 });
 
+bot.command('lookfor', async (ctx) => {
+  const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
+  if (!isStaffGroup) return;
+
+  const topicId = ctx.message.message_thread_id;
+  const query = ctx.match ? ctx.match.trim() : '';
+
+  if (!query) {
+    return ctx.reply("⚠️ Usage: `/lookfor <User ID | @username | Department>`", { 
+      message_thread_id: topicId, 
+      parse_mode: 'Markdown' 
+    });
+  }
+
+  const cleanQuery = query.replace(/^@/, '');
+
+  const res = await pool.query(
+    `SELECT user_id, username, department, status, rejection_reason, processed_by, created_at, updated_at 
+     FROM tickets 
+     WHERE user_id::text = $1 
+        OR LOWER(username) = LOWER($1) 
+        OR LOWER(department) LIKE LOWER($2)
+     ORDER BY updated_at DESC LIMIT 10`,
+    [cleanQuery, `%${cleanQuery}%`]
+  );
+
+  if (res.rows.length === 0) {
+    return ctx.reply(`🔍 No receipts found matching: **${query}**`, { 
+      message_thread_id: topicId, 
+      parse_mode: 'Markdown' 
+    });
+  }
+
+  let text = `🔍 **SEARCH RESULTS FOR:** \`${query}\` (${res.rows.length})\n\n`;
+
+  res.rows.forEach((r, idx) => {
+    let statusEmoji = "⏳";
+    if (r.status === 'APPROVED') statusEmoji = "✅";
+    if (r.status === 'REJECTED') statusEmoji = "❌";
+
+    const uname = r.username ? `@${r.username}` : "N/A";
+    const staff = r.processed_by ? ` (Processed by: ${r.processed_by})` : "";
+    const dateStr = new Date(r.updated_at).toLocaleDateString();
+
+    text += `${idx + 1}. ${statusEmoji} **${r.department}**\n`;
+    text += `   • Student ID: \`${r.user_id}\` (${uname})\n`;
+    text += `   • Status: ${r.status}${staff}\n`;
+    text += `   • Last Update: ${dateStr}\n`;
+    if (r.status === 'REJECTED' && r.rejection_reason) {
+      text += `   • Reason: ${r.rejection_reason}\n`;
+    }
+    text += `\n`;
+  });
+
+  await ctx.reply(text, { message_thread_id: topicId, parse_mode: 'Markdown' });
+});
+
 bot.command('stats', async (ctx) => {
   const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
   if (!isStaffGroup) return;
@@ -604,7 +661,6 @@ bot.on('message', async (ctx) => {
     }
   } 
   else if (isStaffGroup) {
-    // Strictly require a slash '/' for all commands in the staff group
     if (!ctx.message.text || !ctx.message.text.startsWith('/')) {
       return;
     }
@@ -749,6 +805,7 @@ async function main() {
     // Group chats (Staff Group)
     await bot.api.setMyCommands(
       [
+        { command: 'lookfor', description: 'Search records by ID, username, or dept' },
         { command: 'broadcast', description: 'Send announcement to all students' },
         { command: 'stats', description: 'View approval/rejection statistics' },
         { command: 'export', description: 'Export student records CSV' }
