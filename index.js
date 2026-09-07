@@ -122,7 +122,7 @@ const STRINGS = {
     reuploadBtn: "🔄 Re-upload Receipt",
     noFileErr: "⚠️ Please send an actual **photo or screenshot** of your payment receipt. Text-only messages cannot be processed as receipts.",
     deptUpdated: "🔄 **Department Updated**\nYour receipt submission has been transferred to **{dept}**. Our review team will process your payment under this department.",
-    pendingExists: "⚠️ **Active Submission Pending**\n\nYou already have a receipt under review. Please wait for staff verification or check your status using /status before submitting a new one."
+    pendingExists: "⚠️ **Active Submission Pending**\n\nYou already have a receipt under review. Please wait for staff verification or check your status before submitting a new one."
   },
   am: {
     welcome: "👋 **እንኳን ወደ ክፍያ መላኪያ ቦት በሰላም መጡ!**\n\nእባክዎን ደረሰኝዎን ከመላክዎ በፊት **ትምህርት ክፍልዎን (Department)** ይምረጡ፡",
@@ -135,7 +135,7 @@ const STRINGS = {
     reuploadBtn: "🔄 ደረሰኝ እንደገና ስቀል",
     noFileErr: "⚠️ እባክዎን ትክክለኛ የክፍያ ደረሰኝ **ፎቶ ወይም ስክሪንሾት** ይላኩ። በጽሁፍ ብቻ የሚላክ መረጃ አይቀበልም።",
     deptUpdated: "🔄 **ትምህርት ክፍል ተቀይሯል**\nየደረሰኝ ማመልከቻዎ ወደ **{dept}** ተዛውሯል። መረጃዎ በዚህ ትምህርት ክፍል ስር የሚታይ ይሆናል።",
-    pendingExists: "⚠️ **አሁንም በሂደት ላይ ያለ ማመልከቻ አለ**\n\nቀደም ሲል የላኩት ደረሰኝ በመገምገም ላይ ይገኛል። እባክዎን የቡድኑን ምላሽ ይጠብቁ ወይም ሁኔታውን በ /status ይመልከቱ።"
+    pendingExists: "⚠️ **አሁንም በሂደት ላይ ያለ ማመልከቻ አለ**\n\nቀደም ሲል የላኩት ደረሰኝ በመገምገም ላይ ይገኛል። እባክዎን የቡድኑን ምላሽ ይጠብቁ።"
   }
 };
 
@@ -492,8 +492,8 @@ bot.callbackQuery('cmd_status', async (ctx) => {
 
   if (res.rows.length === 0) {
     const noSubMsg = lang === 'am' 
-      ? "ℹ️ እስከ አሁን ምንም ደረሰኝ አላስገቡም። ለማስገባት /start ን ይጫኑ።"
-      : "ℹ️ You have not submitted any payment receipts yet. Use /start to begin a submission.";
+      ? "ℹ️ እስከ አሁን ምንም ደረሰኝ አላስገቡም። ለማስገባት የታችኛውን ቁልፎች ይጫኑ።"
+      : "ℹ️ You have not submitted any payment receipts yet. Use the action panel below to start.";
     return ctx.reply(noSubMsg, { parse_mode: 'Markdown' });
   }
 
@@ -515,8 +515,8 @@ bot.callbackQuery('cmd_status', async (ctx) => {
   
   if (ticket.status === 'REJECTED' && ticket.rejection_reason) {
     msg += lang === 'am' 
-      ? `• **ምክንያት:** ${ticket.rejection_reason}\n\nእባክዎን እንደገና ለመላክ /start ን ይጫኑ።`
-      : `• **Reason:** ${ticket.rejection_reason}\n\nType /start or re-upload a clear receipt to resubmit.`;
+      ? `• **ምክንያት:** ${ticket.rejection_reason}\n\nእባክዎን አዲስ ደረሰኝ ለመላክ 'Submit Payment' የሚለውን ይጫኑ።`
+      : `• **Reason:** ${ticket.rejection_reason}\n\nTap 'Submit Payment' in the panel to re-upload.`;
   } else if (ticket.status === 'PENDING') {
     msg += lang === 'am' 
       ? `\nየክትትል ቡድኑ ደረሰኝዎን እየገመገመ ነው። እንደተጠናቀቀ እናሳውቅዎታለን።`
@@ -668,7 +668,7 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
 });
 
 // -------------------------------------------------------------
-// MESSAGE & FORCE-REPLY INPUT LISTENER (CRASH FIX)
+// MESSAGE & FORCE-REPLY INPUT LISTENER
 // -------------------------------------------------------------
 
 bot.on('message', async (ctx) => {
@@ -875,15 +875,25 @@ app.get('/', (req, res) => {
   res.send('Tuition Receipt Bot is active');
 });
 
+// -------------------------------------------------------------
+// BOT INITIALIZATION WITH COMMAND CLEANUP
+// -------------------------------------------------------------
+
 async function main() {
   await initDB();
 
   try {
+    // 1. Delete all globally cached slash commands across private and group chats
+    await bot.api.deleteMyCommands();
+    await bot.api.deleteMyCommands({ scope: { type: 'all_private_chats' } });
+    await bot.api.deleteMyCommands({ scope: { type: 'all_group_chats' } });
+
+    // 2. Register only clean commands
     await bot.api.setMyCommands([
-      { command: 'panel', description: 'Open action panel' },
-      { command: 'start', description: 'Start payment receipt submission' }
+      { command: 'start', description: 'Start payment receipt submission' },
+      { command: 'panel', description: 'Open interactive action panel' }
     ]);
-    console.log("Scoped bot commands registered successfully with Telegram.");
+    console.log("Cached commands deleted and clean panel commands registered.");
   } catch (cmdErr) {
     console.error("Failed to register bot commands:", cmdErr.message);
   }
