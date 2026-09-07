@@ -83,7 +83,6 @@ async function initDB() {
 
 const pendingDepartments = new Map();
 const userLanguages = new Map(); // Stores userId -> 'en' | 'am'
-const sessionTimers = new Map(); // Stores userId -> setTimeout reference
 
 const DEPARTMENTS = [
   "Marketing Management",
@@ -108,8 +107,7 @@ const STRINGS = {
     reuploadBtn: "🔄 Re-upload Receipt",
     noFileErr: "⚠️ Please send an actual **photo or screenshot** of your payment receipt. Text-only messages cannot be processed as receipts.",
     deptUpdated: "🔄 **Department Updated**\nYour receipt submission has been transferred to **{dept}**. Our review team will process your payment under this department.",
-    pendingExists: "⚠️ **Active Submission Pending**\n\nYou already have a receipt under review. Please wait for staff verification or check your status using /status before submitting a new one.",
-    sessionExpired: "⏱️ **Session Expired**\n\nYour department selection has timed out due to inactivity. Please use /start to begin again."
+    pendingExists: "⚠️ **Active Submission Pending**\n\nYou already have a receipt under review. Please wait for staff verification or check your status using /status before submitting a new one."
   },
   am: {
     welcome: "👋 **እንኳን ወደ ክፍያ መላኪያ ቦት በሰላም መጡ!**\n\nእባክዎን ደረሰኝዎን ከመላክዎ በፊት **ትምህርት ክፍልዎን (Department)** ይምረጡ፡",
@@ -122,8 +120,7 @@ const STRINGS = {
     reuploadBtn: "🔄 ደረሰኝ እንደገና ስቀል",
     noFileErr: "⚠️ እባክዎን ትክክለኛ የክፍያ ደረሰኝ **ፎቶ ወይም ስክሪንሾት** ይላኩ። በጽሁፍ ብቻ የሚላክ መረጃ አይቀበልም።",
     deptUpdated: "🔄 **ትምህርት ክፍል ተቀይሯል**\nየደረሰኝ ማመልከቻዎ ወደ **{dept}** ተዛውሯል። መረጃዎ በዚህ ትምህርት ክፍል ስር የሚታይ ይሆናል።",
-    pendingExists: "⚠️ **አሁንም በሂደት ላይ ያለ ማመልከቻ አለ**\n\nቀደም ሲል የላኩት ደረሰኝ በመገምገም ላይ ይገኛል። እባክዎን የቡድኑን ምላሽ ይጠብቁ ወይም ሁኔታውን በ /status ይመልከቱ።",
-    sessionExpired: "⏱️ **ጊዜው አልፏል**\n\nለረጅም ጊዜ ባለመላክዎ ምክንያት የተመረጠው ትምህርት ክፍል ተሰርዟል። እባክዎን እንደገና ለመጀመር /start ን ይጫኑ።"
+    pendingExists: "⚠️ **አሁንም በሂደት ላይ ያለ ማመልከቻ አለ**\n\nቀደም ሲል የላኩት ደረሰኝ በመገምገም ላይ ይገኛል። እባክዎን የቡድኑን ምላሽ ይጠብቁ ወይም ሁኔታውን በ /status ይመልከቱ።"
   }
 };
 
@@ -288,11 +285,6 @@ bot.command('start', async (ctx) => {
   const userId = ctx.from.id;
   pendingDepartments.delete(userId);
 
-  if (sessionTimers.has(userId)) {
-    clearTimeout(sessionTimers.get(userId));
-    sessionTimers.delete(userId);
-  }
-
   const langKeyboard = new InlineKeyboard()
     .text("🇬🇧 English", "lang_en")
     .text("🇪🇹 አማርኛ", "lang_am");
@@ -443,10 +435,6 @@ bot.callbackQuery('start_resubmit', async (ctx) => {
   const t = STRINGS[lang];
 
   pendingDepartments.delete(userId);
-  if (sessionTimers.has(userId)) {
-    clearTimeout(sessionTimers.get(userId));
-    sessionTimers.delete(userId);
-  }
 
   await ctx.reply(
     t.reuploadPrompt,
@@ -459,27 +447,8 @@ bot.callbackQuery(/^dept_(.+)$/, async (ctx) => {
   const userId = ctx.from.id;
   const lang = userLanguages.get(userId) || 'en';
   const t = STRINGS[lang];
-  
-  if (sessionTimers.has(userId)) {
-    clearTimeout(sessionTimers.get(userId));
-  }
 
   pendingDepartments.set(userId, selectedDept);
-
-  // Set 15-minute auto-timeout
-  const timer = setTimeout(async () => {
-    if (pendingDepartments.has(userId)) {
-      pendingDepartments.delete(userId);
-      sessionTimers.delete(userId);
-      try {
-        await bot.api.sendMessage(userId, t.sessionExpired, { parse_mode: 'Markdown' });
-      } catch (err) {
-        console.error("Could not send session timeout message:", err);
-      }
-    }
-  }, 15 * 60 * 1000);
-
-  sessionTimers.set(userId, timer);
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
@@ -611,12 +580,7 @@ bot.on('message', async (ctx) => {
         VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
       `, [userId, username, fileId, topicId, forwardedMsgId, sentTicketMsg.message_id, chosenDept]);
 
-      // Clear pending state and timer on successful upload
       pendingDepartments.delete(userId);
-      if (sessionTimers.has(userId)) {
-        clearTimeout(sessionTimers.get(userId));
-        sessionTimers.delete(userId);
-      }
 
       await ctx.reply(t.receiptReceived, { parse_mode: 'Markdown' });
     } catch (err) {
