@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const cron = require('node-cron');
+const PDFDocument = require('pdfkit');
 
 const app = express();
 app.use(express.json());
@@ -112,7 +113,7 @@ const STRINGS = {
     receiptReceived: "✅ Your receipt has been sent to the staff review team. We will notify you once verified.",
     sendReceiptPrompt: "✅ Selected Department: **{dept}**\n\nNow, please send your receipt photo or screenshot with your Full Name and Student ID.",
     reuploadPrompt: "🔄 **Re-submitting Receipt**\nPlease choose your payment plan to initiate a new submission:",
-    approvedMsg: "✅ **Receipt Verified!**\nYour payment submission has been approved. Thank you!",
+    approvedMsg: "✅ **Receipt Verified!**\nYour payment submission has been approved. Your official approval PDF slip is attached below.",
     rejectedMsg: "❌ **Receipt Rejected**\n\n**Reason:** {reason}\n\n{message}",
     reuploadBtn: "🔄 Re-upload Receipt",
     noFileErr: "⚠️ Please send an actual **photo or screenshot** of your payment receipt. Text-only messages cannot be processed as receipts.",
@@ -128,7 +129,7 @@ const STRINGS = {
     receiptReceived: "✅ ደረሰኝዎ ለክትትል ቡድኑ ተልኳል። እንደተረጋገጠ እናሳውቅዎታለን።",
     sendReceiptPrompt: "✅ የተመረጠው ትምህርት ክፍል፡ **{dept}**\n\nአሁን እባክዎን የክፍያ ደረሰኝ ፎቶዎን ከሙሉ ስምዎ እና የተማሪ ID ጋር ይላኩ።",
     reuploadPrompt: "🔄 **ደረሰኝ እንደገና መላክ**\nእባክዎን አዲስ ማመልከቻ ለመጀመር የክፍያ ዓይነትዎን ይምረጡ፡",
-    approvedMsg: "✅ **ደረሰኝዎ ተረጋግጧል!**\nየክፍያ ማረጋገጫዎ ጸድቋል። እናመሰግናለን!",
+    approvedMsg: "✅ **ደረሰኝዎ ተረጋግጧል!**\nየክፍያ ማረጋገጫዎ ጸድቋል። ይፋዊ የማረጋገጫ ፒዲኤፍ ደረሰኝዎ ከታች ተያይዟል።",
     rejectedMsg: "❌ **ደረሰኝዎ ውድቅ ተደርጓል**\n\n**ምክንያት:** {reason}\n\n{message}",
     reuploadBtn: "🔄 ደረሰኝ እንደገና ስቀል",
     noFileErr: "⚠️ እባክዎን ትክክለኛ የክፍያ ደረሰኝ **ፎቶ ወይም ስክሪንሾት** ይላኩ። በጽሁፍ ብቻ የሚላክ መረጃ አይቀበልም።",
@@ -226,6 +227,36 @@ function getRejectionReasonKeyboard(userId, topicId) {
     kb.text(r.label, `confirmrej_${userId}_${topicId}_${r.code}`).row();
   });
   return kb;
+}
+
+async function generateApprovalPDF(userId, username, department, staffName) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 50 });
+    const filePath = path.join(__dirname, `approval_slip_${userId}.pdf`);
+    const stream = fs.createWriteStream(filePath);
+
+    doc.pipe(stream);
+
+    doc.fontSize(20).text('RENAISSANCE GLOBAL', { align: 'center' });
+    doc.fontSize(14).text('Official Tuition Payment Approval Slip', { align: 'center' });
+    doc.moveDown(2);
+
+    doc.fontSize(12);
+    doc.text(`Student ID: ${userId}`);
+    doc.text(`Username: @${username}`);
+    doc.text(`Department: ${department}`);
+    doc.text(`Status: APPROVED`);
+    doc.text(`Processed By: ${staffName}`);
+    doc.text(`Date: ${new Date().toLocaleString()}`);
+    doc.moveDown(4);
+
+    doc.fontSize(10).text('This is an official computer-generated receipt approval slip from the Renaissance Global Student Portal.', { align: 'center' });
+
+    doc.end();
+
+    stream.on('finish', () => resolve(filePath));
+    stream.on('error', reject);
+  });
 }
 
 bot.catch((err) => console.error('Error in bot framework:', err));
@@ -374,10 +405,6 @@ async function performBroadcast(ctx, topicId, broadcastMsg) {
   await ctx.reply(`✅ **Broadcast Complete**\n• Delivered: ${successCount}\n• Failed: ${failCount}`, { message_thread_id: topicId });
 }
 
-// -------------------------------------------------------------
-// UNIFIED ACTION PANELS & COMMANDS
-// -------------------------------------------------------------
-
 bot.command(['start', 'panel'], async (ctx) => {
   const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
   const isPrivate = ctx.chat.type === 'private';
@@ -422,7 +449,6 @@ bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   );
 });
 
-// STAFF BUTTON CALLBACKS
 bot.callbackQuery('cmd_lookfor', async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.reply(
@@ -461,7 +487,6 @@ bot.callbackQuery('cmd_broadcast', async (ctx) => {
   );
 });
 
-// STUDENT WIZARD & BUTTON CALLBACKS
 bot.callbackQuery('cmd_submit', async (ctx) => {
   await ctx.answerCallbackQuery();
   const userId = ctx.from.id;
@@ -620,10 +645,11 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
 
   await ctx.answerCallbackQuery();
 
-  const ticketRes = await pool.query('SELECT topic_id, message_id, ticket_msg_id FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1', [targetUserId]);
+  const ticketRes = await pool.query('SELECT topic_id, message_id, ticket_msg_id, username FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1', [targetUserId]);
 
   if (ticketRes.rows.length > 0) {
     const ticket = ticketRes.rows[0];
+    const username = ticket.username || 'Unknown';
     if (ticket.ticket_msg_id) {
       try {
         await ctx.api.deleteMessage(STAFF_GROUP_ID, Number(ticket.ticket_msg_id));
@@ -646,7 +672,7 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
 
       const newTicketMsg = await ctx.api.sendMessage(
         STAFF_GROUP_ID,
-        `📥 New Submission\n• Student ID: ${targetUserId}\n• Username: @${username}\n• Department: ${chosenDeptTagged}`,
+        `📥 New Submission\n• Student ID: ${targetUserId}\n• Username: @${username}\n• Department: ${newDeptTagged}`,
         { message_thread_id: newTopicId, reply_markup: actionKeyboard }
       );
 
@@ -679,7 +705,6 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
   );
 });
 
-// MESSAGE & FORCE-REPLY INPUT LISTENER
 bot.on('message', async (ctx) => {
   if (ctx.from && ctx.from.is_bot) return;
 
@@ -784,11 +809,21 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   const lang = userLanguages.get(userId) || 'en';
   const t = STRINGS[lang];
 
-  await ctx.api.sendMessage(
-    userId,
-    t.approvedMsg,
-    { parse_mode: 'Markdown' }
-  );
+  try {
+    const pdfPath = await generateApprovalPDF(userId, username, deptTag, staffName);
+    await ctx.api.sendDocument(
+      userId,
+      new InputFile(pdfPath, `Tuition_Approval_Slip_${userId}.pdf`),
+      { caption: t.approvedMsg, parse_mode: 'Markdown' }
+    );
+    // Clean up temporary file
+    if (fs.existsSync(pdfPath)) {
+      fs.unlinkSync(pdfPath);
+    }
+  } catch (pdfErr) {
+    console.error("Failed to generate or send approval PDF:", pdfErr);
+    await ctx.api.sendMessage(userId, t.approvedMsg, { parse_mode: 'Markdown' });
+  }
 
   await ctx.editMessageText(
     `✅ Approved Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${deptTag}\n• Approved by: ${staffName}`,
@@ -874,7 +909,7 @@ cron.schedule('0 8 * * *', async () => {
 
     const dailyReport = `🌅 **DAILY TUITION PORTAL SUMMARY**\n\n⏳ **Total Pending:** ${totalPending}\n\n---\n\n${appSummary}\n\n---\n\n${rejSummary}`;
 
-    await bot.api.sendMessage(STAFF_GROUP_ID, dailyReport, { parse_mode: 'Markdown' });
+    await bot.api.sendMessage(STAFF_GROUP_ID, dailyReport, { message_thread_id: APPROVED_THREAD_ID || null });
   } catch (err) {
     console.error("Error generating daily summary cron report:", err);
   }
