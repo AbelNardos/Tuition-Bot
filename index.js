@@ -112,6 +112,7 @@ const DEPARTMENTS = [
 
 const STRINGS = {
   en: {
+    portalWelcome: "👋 **Welcome to Renaissance Global Student Portal**\n\nSelect an option below to manage your tuition submissions:",
     welcome: "👋 **Welcome to the Tuition Payment Portal!**\n\nPlease select your **Department** below before sending your receipt and details:",
     selectDept: "Please select your department:",
     receiptReceived: "✅ Your receipt has been sent to the staff review team. We will notify you once verified.",
@@ -122,9 +123,11 @@ const STRINGS = {
     reuploadBtn: "🔄 Re-upload Receipt",
     noFileErr: "⚠️ Please send an actual **photo or screenshot** of your payment receipt. Text-only messages cannot be processed as receipts.",
     deptUpdated: "🔄 **Department Updated**\nYour receipt submission has been transferred to **{dept}**. Our review team will process your payment under this department.",
-    pendingExists: "⚠️ **Active Submission Pending**\n\nYou already have a receipt under review. Please wait for staff verification or check your status before submitting a new one."
+    pendingExists: "⚠️ **Active Submission Pending**\n\nYou already have a receipt under review. Please wait for staff verification or check your status before submitting a new one.",
+    helpText: "❓ **Need Assistance?**\n\nIf you have issues regarding your tuition payments or department registration, please contact the registrar office directly or submit your payment receipt photo."
   },
   am: {
+    portalWelcome: "👋 **እንኳን ወደ ሬነሳንስ ግሎባል የተማሪዎች ፖርታል በሰላም መጡ**\n\nየክፍያ ማመልከቻዎን ለማስተዳደር ከታች ካሉት አማራጮች አንዱን ይምረጡ፡",
     welcome: "👋 **እንኳን ወደ ክፍያ መላኪያ ቦት በሰላም መጡ!**\n\nእባክዎን ደረሰኝዎን ከመላክዎ በፊት **ትምህርት ክፍልዎን (Department)** ይምረጡ፡",
     selectDept: "እባክዎን ትምህርት ክፍልዎን ይምረጡ፡",
     receiptReceived: "✅ ደረሰኝዎ ለክትትል ቡድኑ ተልኳል። እንደተረጋገጠ እናሳውቅዎታለን።",
@@ -135,7 +138,8 @@ const STRINGS = {
     reuploadBtn: "🔄 ደረሰኝ እንደገና ስቀል",
     noFileErr: "⚠️ እባክዎን ትክክለኛ የክፍያ ደረሰኝ **ፎቶ ወይም ስክሪንሾት** ይላኩ። በጽሁፍ ብቻ የሚላክ መረጃ አይቀበልም።",
     deptUpdated: "🔄 **ትምህርት ክፍል ተቀይሯል**\nየደረሰኝ ማመልከቻዎ ወደ **{dept}** ተዛውሯል። መረጃዎ በዚህ ትምህርት ክፍል ስር የሚታይ ይሆናል።",
-    pendingExists: "⚠️ **አሁንም በሂደት ላይ ያለ ማመልከቻ አለ**\n\nቀደም ሲል የላኩት ደረሰኝ በመገምገም ላይ ይገኛል። እባክዎን የቡድኑን ምላሽ ይጠብቁ።"
+    pendingExists: "⚠️ **አሁንም በሂደት ላይ ያለ ማመልከቻ አለ**\n\nቀደም ሲል የላኩት ደረሰኝ በመገምገም ላይ ይገኛል። እባክዎን የቡድኑን ምላሽ ይጠብቁ።",
+    helpText: "❓ **እርዳታ ይፈልጋሉ?**\n\nበትምህርት ክፍያ ወይም በትምህርት ክፍል ምዝገባ ላይ ጥያቄ ወይም ችግር ካለዎት፣ እባክዎን የሬጅስትራር ቢሮውን በቀጥታ ያነጋግሩ ወይም የክፍያ ደረሰኝ ፎቶዎን ይላኩ።"
   }
 };
 
@@ -185,7 +189,14 @@ function getStaffKeyboard() {
     .text('📢 Broadcast', 'cmd_broadcast');
 }
 
-function getStudentKeyboard() {
+function getStudentKeyboard(lang = 'en') {
+  if (lang === 'am') {
+    return new InlineKeyboard()
+      .text('📤 ደረሰኝ አስገባ', 'cmd_submit')
+      .text('📌 ሁኔታውን እወቅ', 'cmd_status').row()
+      .text('📜 የክፍያ ታሪክ', 'cmd_history')
+      .text('❓ እርዳታ / እገዛ', 'cmd_help');
+  }
   return new InlineKeyboard()
     .text('📤 Submit Payment', 'cmd_submit')
     .text('📌 Check Status', 'cmd_status').row()
@@ -420,9 +431,11 @@ bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   userLanguages.set(ctx.from.id, lang);
   await ctx.answerCallbackQuery();
 
+  const t = STRINGS[lang];
+
   await ctx.editMessageText(
-    "👋 **Welcome to Renaissance Global Student Portal**\n\nSelect an option below to manage your tuition submissions:",
-    { parse_mode: 'Markdown', reply_markup: getStudentKeyboard() }
+    t.portalWelcome,
+    { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang) }
   );
 });
 
@@ -515,7 +528,7 @@ bot.callbackQuery('cmd_status', async (ctx) => {
   
   if (ticket.status === 'REJECTED' && ticket.rejection_reason) {
     msg += lang === 'am' 
-      ? `• **ምክንያት:** ${ticket.rejection_reason}\n\nእባክዎን አዲስ ደረሰኝ ለመላክ 'Submit Payment' የሚለውን ይጫኑ።`
+      ? `• **ምክንያት:** ${ticket.rejection_reason}\n\nእባክዎን አዲስ ደረሰኝ ለመላክ 'ደረሰኝ አስገባ' የሚለውን ይጫኑ።`
       : `• **Reason:** ${ticket.rejection_reason}\n\nTap 'Submit Payment' in the panel to re-upload.`;
   } else if (ticket.status === 'PENDING') {
     msg += lang === 'am' 
@@ -567,9 +580,9 @@ bot.callbackQuery('cmd_history', async (ctx) => {
 
 bot.callbackQuery('cmd_help', async (ctx) => {
   await ctx.answerCallbackQuery();
-  await ctx.reply(
-    "❓ **Need Assistance?**\n\nIf you have issues regarding your tuition payments or department registration, please contact the registrar office directly or submit your payment receipt photo."
-  );
+  const lang = userLanguages.get(ctx.from.id) || 'en';
+  const t = STRINGS[lang];
+  await ctx.reply(t.helpText, { parse_mode: 'Markdown' });
 });
 
 bot.callbackQuery('start_resubmit', async (ctx) => {
@@ -883,12 +896,12 @@ async function main() {
   await initDB();
 
   try {
-    // 1. Delete all globally cached slash commands across private and group chats
+    // Delete cached slash commands across private and group chats
     await bot.api.deleteMyCommands();
     await bot.api.deleteMyCommands({ scope: { type: 'all_private_chats' } });
     await bot.api.deleteMyCommands({ scope: { type: 'all_group_chats' } });
 
-    // 2. Register only clean commands
+    // Register clean panel commands
     await bot.api.setMyCommands([
       { command: 'start', description: 'Start payment receipt submission' },
       { command: 'panel', description: 'Open interactive action panel' }
