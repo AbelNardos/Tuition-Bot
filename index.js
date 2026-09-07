@@ -124,7 +124,7 @@ const STRINGS = {
   }
 };
 
-// Rejection Reasons with Context-Specific Guidance in EN & AM
+// Rejection Reasons
 const REJECTION_REASONS = [
   { 
     label: "📷 Blurry/Unreadable Receipt", 
@@ -431,7 +431,15 @@ bot.command('lookfor', async (ctx) => {
   if (!isStaffGroup) return;
 
   const topicId = ctx.message.message_thread_id;
-  const query = ctx.match ? ctx.match.trim() : '';
+
+  // Clean off the bot username if Telegram appends it (e.g. /lookfor@RENGLO2BOT query)
+  let rawMatch = ctx.match ? ctx.match.trim() : '';
+  const botUsername = ctx.me?.username;
+  if (botUsername && rawMatch.toLowerCase().startsWith(`@${botUsername.toLowerCase()}`)) {
+    rawMatch = rawMatch.substring(botUsername.length + 1).trim();
+  }
+
+  const query = rawMatch;
 
   if (!query) {
     return ctx.reply("⚠️ Usage: `/lookfor <User ID | @username | Department>`", { 
@@ -440,6 +448,7 @@ bot.command('lookfor', async (ctx) => {
     });
   }
 
+  // Clean '@' symbol if searching by username
   const cleanQuery = query.replace(/^@/, '');
 
   const res = await pool.query(
