@@ -82,6 +82,7 @@ async function initDB() {
 
 const pendingDepartments = new Map();
 const userLanguages = new Map(); // Stores userId -> 'en' | 'am'
+const pendingConfirmations = new Map(); // Stores userId -> { fileId, department, originalMsgId }
 
 const DEPARTMENTS = [
   "Marketing Management",
@@ -280,6 +281,7 @@ function getDepartmentKeyboard() {
 
 bot.command('start', async (ctx) => {
   pendingDepartments.delete(ctx.from.id);
+  pendingConfirmations.delete(ctx.from.id);
 
   const langKeyboard = new InlineKeyboard()
     .text("🇬🇧 English", "lang_en")
@@ -359,6 +361,7 @@ bot.callbackQuery('start_resubmit', async (ctx) => {
   const t = STRINGS[lang];
 
   pendingDepartments.delete(userId);
+  pendingConfirmations.delete(userId);
   await ctx.reply(
     t.reuploadPrompt,
     { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard() }
@@ -378,6 +381,100 @@ bot.callbackQuery(/^dept_(.+)$/, async (ctx) => {
     t.sendReceiptPrompt.replace('{dept}', selectedDept),
     { parse_mode: 'Markdown' }
   );
+});
+
+// Photo upload handler with confirmation preview
+bot.on('message:photo', async (ctx) => {
+  const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
+  if (isStaffGroup) return;
+
+  const userId = ctx.from.id;
+  const lang = userLanguages.get(userId) || 'en';
+  const chosenDept = pendingDepartments.get(userId);
+
+  if (!chosenDept) {
+    const msg = lang === 'am' 
+      ? "⚠️ እባክዎን አስቀድመው /start በመጫን ትምህርት ክፍልዎን ይምረጡ።"
+      : "⚠️ Please select your department first by typing /start.";
+    return ctx.reply(msg);
+  }
+
+  const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+
+  // Save temp confirmation data
+  pendingConfirmations.set(userId, {
+    fileId: fileId,
+    department: chosenDept,
+    originalMsgId: ctx.message.message_id
+  });
+
+  const confirmKb = new InlineKeyboard()
+    .text(lang === 'am' ? "✅ አረጋግጥ እና ላክ" : "✅ Confirm & Submit", "confirm_student_upload")
+    .row()
+    .text(lang === 'am' ? "🔄 እንደገና ምረጽ" : "🔄 Change Dept / Retake", "start_resubmit");
+
+  const previewText = lang === 'am'
+    ? `📋 **እባክዎን ማመልከቻዎን ያረጋግጡ**\n\n• **ትምህርት ክፍል:** ${chosenDept}\n• **የተማሪ ID:** \`${userId}\`\n\nይህ ደረሰኝ ለክትትል ቡድኑ እንዲላክ ይፈልጋሉ?`
+    : `📋 **Please Confirm Your Submission**\n\n• **Department:** ${chosenDept}\n• **Student ID:** \`${userId}\`\n\nAre you ready to submit this receipt for review?`;
+
+  await ctx.replyWithPhoto(fileId, {
+    caption: previewText,
+    parse_mode: 'Markdown',
+    reply_markup: confirmKb
+  });
+});
+
+// Final receipt confirmation processor
+bot.callbackQuery('confirm_student_upload', async (ctx) => {
+  const userId = ctx.from.id;
+  const username = ctx.from.username || ctx.from.first_name || 'Unknown';
+  const lang = userLanguages.get(userId) || 'en';
+  const t = STRINGS[lang];
+
+  const pendingData = pendingConfirmations.get(userId);
+
+  if (!pendingData) {
+    await ctx.answerCallbackQuery({ text: "Session expired. Please re-upload your receipt.", show_alert: true });
+    return;
+  }
+
+  await ctx.answerCallbackQuery();
+
+  try {
+    const topicId = await getOrCreateDepartmentTopic(ctx, pendingData.department);
+
+    const forwardRes = await ctx.api.copyMessage(STAFF_GROUP_ID, ctx.chat.id, pendingData.originalMsgId, {
+      message_thread_id: topicId
+    });
+
+    const actionKeyboard = new InlineKeyboard()
+      .text("✅ Approve", `app_${userId}_${topicId}`).row()
+      .text("❌ Reject", `rej_${userId}_${topicId}`).row()
+      .text("🔄 Transfer Dept", `trans_${userId}`);
+
+    const sentTicketMsg = await ctx.api.sendMessage(
+      STAFF_GROUP_ID,
+      `📥 New Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${pendingData.department}`,
+      { message_thread_id: topicId, reply_markup: actionKeyboard }
+    );
+
+    await pool.query(`
+      INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, department, status) 
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
+    `, [userId, username, pendingData.fileId, topicId, forwardRes.message_id, sentTicketMsg.message_id, pendingData.department]);
+
+    pendingDepartments.delete(userId);
+    pendingConfirmations.delete(userId);
+
+    await ctx.editMessageCaption({
+      caption: t.receiptReceived,
+      parse_mode: 'Markdown'
+    });
+
+  } catch (err) {
+    console.error("Failed to forward confirmed receipt:", err);
+    await ctx.reply(`❌ Error submitting receipt: ${err.message}`);
+  }
 });
 
 bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
@@ -450,51 +547,17 @@ bot.on('message', async (ctx) => {
   if (ctx.from && ctx.from.is_bot) return;
 
   const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
-  if (!isStaffGroup && ctx.message.text && ctx.message.text.startsWith('/')) return;
 
   if (!isStaffGroup) {
-    const userId = ctx.from.id;
-    const username = ctx.from.username || ctx.from.first_name || 'Unknown';
-    const chosenDept = pendingDepartments.get(userId) || "4-Year Complete Tuition";
-    const lang = userLanguages.get(userId) || 'en';
+    const lang = userLanguages.get(ctx.from.id) || 'en';
     const t = STRINGS[lang];
-    
-    const fileId = ctx.message.photo ? ctx.message.photo[ctx.message.photo.length - 1].file_id : (ctx.message.document ? ctx.message.document.file_id : null);
 
-    if (!fileId) {
+    if (ctx.message.text && ctx.message.text.startsWith('/')) return;
+
+    // Direct text message handler warning
+    if (!ctx.message.photo) {
       await ctx.reply(t.noFileErr, { parse_mode: 'Markdown' });
       return;
-    }
-
-    try {
-      const topicId = await getOrCreateDepartmentTopic(ctx, chosenDept);
-
-      const forwardRes = await ctx.api.copyMessage(STAFF_GROUP_ID, ctx.chat.id, ctx.message.message_id, {
-        message_thread_id: topicId
-      });
-      const forwardedMsgId = forwardRes.message_id;
-
-      const actionKeyboard = new InlineKeyboard()
-        .text("✅ Approve", `app_${userId}_${topicId}`).row()
-        .text("❌ Reject", `rej_${userId}_${topicId}`).row()
-        .text("🔄 Transfer Dept", `trans_${userId}`);
-
-      const sentTicketMsg = await ctx.api.sendMessage(
-        STAFF_GROUP_ID,
-        `📥 New Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${chosenDept}`,
-        { message_thread_id: topicId, reply_markup: actionKeyboard }
-      );
-
-      await pool.query(`
-        INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, department, status) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
-      `, [userId, username, fileId, topicId, forwardedMsgId, sentTicketMsg.message_id, chosenDept]);
-
-      pendingDepartments.delete(userId);
-      await ctx.reply(t.receiptReceived, { parse_mode: 'Markdown' });
-    } catch (err) {
-      console.error("Failed to forward receipt:", err);
-      return ctx.reply(`❌ Error submitting receipt: ${err.message}`);
     }
   } 
   else if (isStaffGroup) {
