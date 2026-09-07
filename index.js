@@ -193,7 +193,7 @@ function getStudentKeyboard(lang = 'en') {
   if (lang === 'am') {
     return new InlineKeyboard()
       .text('📤 ደረሰኝ አስገባ', 'cmd_submit')
-      .text('📌 ሁኔታውን እወቅ', 'cmd_status').row()
+      .text('📌 የደረሰኙን ሁኔታ ያረጋግጡ', 'cmd_status').row()
       .text('📜 የክፍያ ታሪክ', 'cmd_history')
       .text('❓ እርዳታ / እገዛ', 'cmd_help');
   }
