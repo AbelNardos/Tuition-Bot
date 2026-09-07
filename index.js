@@ -646,7 +646,7 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
 
       const newTicketMsg = await ctx.api.sendMessage(
         STAFF_GROUP_ID,
-        `📥 New Transferred Submission\n• Student ID: ${targetUserId}\n• Department: ${newDeptTagged}\n• Transferred by: ${staffName}`,
+        `📥 New Submission\n• Student ID: ${targetUserId}\n• Username: @${username}\n• Department: ${chosenDeptTagged}`,
         { message_thread_id: newTopicId, reply_markup: actionKeyboard }
       );
 
@@ -771,7 +771,7 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   
   const updateRes = await pool.query(
-    "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING'",
+    "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING department, username",
     [staffName, userId]
   );
   
@@ -779,6 +779,8 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
     return ctx.reply("⚠️ Error: Could not find an active pending ticket record in the database for this user.", { message_thread_id: topicId });
   }
 
+  const deptTag = updateRes.rows[0].department;
+  const username = updateRes.rows[0].username || 'N/A';
   const lang = userLanguages.get(userId) || 'en';
   const t = STRINGS[lang];
 
@@ -788,7 +790,10 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
     { parse_mode: 'Markdown' }
   );
 
-  await ctx.editMessageText(`✅ Receipt approved by **${staffName}**.`, { parse_mode: 'Markdown' });
+  await ctx.editMessageText(
+    `✅ Approved Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${deptTag}\n• Approved by: ${staffName}`,
+    { parse_mode: 'Markdown' }
+  );
 
   if (APPROVED_THREAD_ID) {
     const sortedReport = await generateSummaryText('APPROVED');
