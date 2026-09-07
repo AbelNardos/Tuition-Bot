@@ -5,6 +5,7 @@ const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const cron = require('node-cron');
 
 const app = express();
 app.use(express.json());
@@ -132,13 +133,13 @@ const REJECTION_REASONS = [
     label: "📷 Blurry/Unreadable Receipt", 
     code: "blurry",
     message_en: "Please ensure your receipt image is clear, fully visible, and uncropped, then click below to re-upload.",
-    message_am: "እባክዎን የደረሰኝዎ ፎቶ ግልጽ፣ ሙሉ በሙሉ የሚታይ እና ያልተቆረጠ መሆኑን አረጋግጠው እንደገና ይላኩ።"
+    message_am: "እባክዎን የደረሰኝዎ ፎቶ ግልጽ፣ ሙሉ በሙሉ የሚታይ እና ያልተቆረጠ መሆኑን አረጋግተው እንደገና ይላኩ።"
   },
   { 
     label: "💵 Incorrect Amount Paid", 
     code: "amount",
     message_en: "The payment amount does not match your required tuition fees. Please verify your transaction details and re-upload the correct receipt.",
-    message_am: "የተከፈለው የገንዘብ መጠን ከተፈለገው የትምህርት ክፍያ ጋር አይመሳሰልም። እባክዎን የትራንዛክሽን መረጃዎን አረጋግጠው ትክክለኛውን ደረሰኝ ይላኩ።"
+    message_am: "የተከፈለው የገንዘብ መጠን ከተፈለገው የትምህርት ክፍያ ጋር አይመሳሰልም። እባክዎን የትራንዛክሽን መረጃዎን አረጋግተው ትክክለኛውን ደረሰኝ ይላኩ።"
   },
   { 
     label: "🚫 Invalid/Fake Receipt", 
@@ -361,6 +362,78 @@ bot.command('status', async (ctx) => {
   }
 
   await ctx.reply(msg, { parse_mode: 'Markdown' });
+});
+
+// Student Payment History Command (/myhistory)
+bot.command('myhistory', async (ctx) => {
+  const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
+  if (isStaffGroup) return;
+
+  const userId = ctx.from.id;
+  const lang = userLanguages.get(userId) || 'en';
+
+  const res = await pool.query(
+    'SELECT department, status, rejection_reason, created_at FROM tickets WHERE user_id = $1 ORDER BY created_at DESC',
+    [userId]
+  );
+
+  if (res.rows.length === 0) {
+    const noHistory = lang === 'am'
+      ? "ℹ️ ምንም የተመዘገበ የክፍያ ታሪክ የለም።"
+      : "ℹ️ No payment submission history found.";
+    return ctx.reply(noHistory, { parse_mode: 'Markdown' });
+  }
+
+  let text = lang === 'am'
+    ? `📜 **የክፍያ ታሪክዎት (${res.rows.length}):**\n\n`
+    : `📜 **Your Payment History (${res.rows.length}):**\n\n`;
+
+  res.rows.forEach((r, idx) => {
+    const dateStr = new Date(r.created_at).toLocaleDateString();
+    let statusIcon = "⏳";
+    if (r.status === 'APPROVED') statusIcon = "✅";
+    if (r.status === 'REJECTED') statusIcon = "❌";
+
+    text += `${idx + 1}. ${statusIcon} **${r.department}**\n`;
+    text += `   • Status: ${r.status}\n`;
+    text += `   • Date: ${dateStr}\n`;
+    if (r.status === 'REJECTED' && r.rejection_reason) {
+      text += `   • Reason: ${r.rejection_reason}\n`;
+    }
+    text += `\n`;
+  });
+
+  await ctx.reply(text, { parse_mode: 'Markdown' });
+});
+
+// Admin Broadcast Command (/broadcast <message>)
+bot.command('broadcast', async (ctx) => {
+  const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
+  if (!isStaffGroup) return;
+
+  const broadcastMsg = ctx.match ? ctx.match.trim() : '';
+  if (!broadcastMsg) {
+    return ctx.reply("⚠️ Usage: `/broadcast <your announcement message here>`", { parse_mode: 'Markdown' });
+  }
+
+  const usersRes = await pool.query('SELECT DISTINCT user_id FROM tickets');
+  const userIds = usersRes.rows.map(r => r.user_id);
+
+  let successCount = 0;
+  let failCount = 0;
+
+  await ctx.reply(`📢 Starting broadcast to ${userIds.length} students...`);
+
+  for (const id of userIds) {
+    try {
+      await bot.api.sendMessage(id, `📢 **ANNOUNCEMENT / ማስታወቂያ**\n\n${broadcastMsg}`, { parse_mode: 'Markdown' });
+      successCount++;
+    } catch (err) {
+      failCount++;
+    }
+  }
+
+  await ctx.reply(`✅ **Broadcast Complete**\n• Delivered: ${successCount}\n• Failed: ${failCount}`);
 });
 
 bot.callbackQuery('start_resubmit', async (ctx) => {
@@ -662,6 +735,23 @@ bot.callbackQuery(/^trans_(\d+)$/, async (ctx) => {
   await ctx.reply("📂 Select new department for transfer:", {
     reply_markup: getTransferKeyboard(userId)
   });
+});
+
+// Daily Summary Scheduler (Runs every day at 8:00 AM)
+cron.schedule('0 8 * * *', async () => {
+  try {
+    const appSummary = await generateSummaryText('APPROVED');
+    const rejSummary = await generateSummaryText('REJECTED');
+    
+    const pendingRes = await pool.query("SELECT COUNT(*) FROM tickets WHERE status = 'PENDING'");
+    const totalPending = pendingRes.rows[0].count;
+
+    const dailyReport = `🌅 **DAILY TUITION PORTAL SUMMARY**\n\n⏳ **Total Pending:** ${totalPending}\n\n---\n\n${appSummary}\n\n---\n\n${rejSummary}`;
+
+    await bot.api.sendMessage(STAFF_GROUP_ID, dailyReport, { parse_mode: 'Markdown' });
+  } catch (err) {
+    console.error("Error generating daily summary cron report:", err);
+  }
 });
 
 // Express Webhook Handling

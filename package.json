@@ -15,6 +15,7 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "grammy": "^1.46.0",
+    "node-cron": "^4.6.0",
     "node-telegram-bot-api": "^2.1.0",
     "pdfkit": "^0.20.2",
     "pg": "^8.23.0"
