@@ -17,7 +17,6 @@ const STAFF_GROUP_ID = String(process.env.STAFF_GROUP_ID || '').trim();
 const APPROVED_THREAD_ID = process.env.APPROVED_THREAD_ID ? Number(process.env.APPROVED_THREAD_ID) : null;
 const REJECTED_THREAD_ID = process.env.REJECTED_THREAD_ID ? Number(process.env.REJECTED_THREAD_ID) : null;
 
-// Global process crash prevention handlers
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
@@ -26,7 +25,6 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception thrown:', err);
 });
 
-// Internal Self-Ping Service (Keeps Render instance warm)
 setInterval(() => {
   const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
   if (RENDER_URL) {
@@ -38,7 +36,6 @@ setInterval(() => {
   }
 }, 8 * 60 * 1000);
 
-// PostgreSQL Connection
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
@@ -81,9 +78,6 @@ async function initDB() {
   `);
 }
 
-// -------------------------------------------------------------
-// GLOBAL MIDDLEWARE: Clean @bot_username from parameters
-// -------------------------------------------------------------
 bot.use(async (ctx, next) => {
   if (ctx.message && ctx.message.text && ctx.match) {
     const botUsername = ctx.me?.username;
@@ -106,18 +100,18 @@ const DEPARTMENTS = [
   "Agribusiness and Value chain management",
   "Educational planning and management",
   "Accounting and finance",
-  "Logistics and Supply chain management",
-  "4-Year Complete Tuition"
+  "Logistics and Supply chain management"
 ];
 
 const STRINGS = {
   en: {
     portalWelcome: "👋 **Welcome to Renaissance Global Student Portal**\n\nSelect an option below to manage your tuition submissions:",
-    welcome: "👋 **Welcome to the Tuition Payment Portal!**\n\nPlease select your **Department** below before sending your receipt and details:",
-    selectDept: "Please select your department:",
+    welcome: "👋 **Welcome to the Tuition Payment Portal!**",
+    selectPlan: "💳 **Step 1 of 2: Select Payment Type**\n\nPlease choose your payment plan:",
+    selectDept: "📚 **Step 2 of 2: Select Your Department**\n\nPlease select your academic department below:",
     receiptReceived: "✅ Your receipt has been sent to the staff review team. We will notify you once verified.",
     sendReceiptPrompt: "✅ Selected Department: **{dept}**\n\nNow, please send your receipt photo or screenshot with your Full Name and Student ID.",
-    reuploadPrompt: "🔄 **Re-submitting Receipt**\nPlease choose your department to initiate a new submission:",
+    reuploadPrompt: "🔄 **Re-submitting Receipt**\nPlease choose your payment plan to initiate a new submission:",
     approvedMsg: "✅ **Receipt Verified!**\nYour payment submission has been approved. Thank you!",
     rejectedMsg: "❌ **Receipt Rejected**\n\n**Reason:** {reason}\n\n{message}",
     reuploadBtn: "🔄 Re-upload Receipt",
@@ -128,11 +122,12 @@ const STRINGS = {
   },
   am: {
     portalWelcome: "👋 **እንኳን ወደ ሬነሳንስ ግሎባል የተማሪዎች ፖርታል በሰላም መጡ**\n\nየክፍያ ማመልከቻዎን ለማስተዳደር ከታች ካሉት አማራጮች አንዱን ይምረጡ፡",
-    welcome: "👋 **እንኳን ወደ ክፍያ መላኪያ ቦት በሰላም መጡ!**\n\nእባክዎን ደረሰኝዎን ከመላክዎ በፊት **ትምህርት ክፍልዎን (Department)** ይምረጡ፡",
-    selectDept: "እባክዎን ትምህርት ክፍልዎን ይምረጡ፡",
+    welcome: "👋 **እንኳን ወደ ክፍያ መላኪያ ቦት በሰላም መጡ!**",
+    selectPlan: "💳 **ደረጃ 1 ከ 2፡ የክፍያ ዓይነት ይምረጡ**\n\nእባክዎን የክፍያ መጠን ዓይነትዎን ይምረጡ፡",
+    selectDept: "📚 **ደረጃ 2 ከ 2፡ ትምህርት ክፍልዎን ይምረጡ**\n\nእባክዎን ትምህርት ክፍልዎን ከታች ካሉት ይምረጡ፡",
     receiptReceived: "✅ ደረሰኝዎ ለክትትል ቡድኑ ተልኳል። እንደተረጋገጠ እናሳውቅዎታለን።",
     sendReceiptPrompt: "✅ የተመረጠው ትምህርት ክፍል፡ **{dept}**\n\nአሁን እባክዎን የክፍያ ደረሰኝ ፎቶዎን ከሙሉ ስምዎ እና የተማሪ ID ጋር ይላኩ።",
-    reuploadPrompt: "🔄 **ደረሰኝ እንደገና መላክ**\nእባክዎን አዲስ ማመልከቻ ለመጀመር ትምህርት ክፍልዎን ይምረጡ፡",
+    reuploadPrompt: "🔄 **ደረሰኝ እንደገና መላክ**\nእባክዎን አዲስ ማመልከቻ ለመጀመር የክፍያ ዓይነትዎን ይምረጡ፡",
     approvedMsg: "✅ **ደረሰኝዎ ተረጋግጧል!**\nየክፍያ ማረጋገጫዎ ጸድቋል። እናመሰግናለን!",
     rejectedMsg: "❌ **ደረሰኝዎ ውድቅ ተደርጓል**\n\n**ምክንያት:** {reason}\n\n{message}",
     reuploadBtn: "🔄 ደረሰኝ እንደገና ስቀል",
@@ -170,15 +165,26 @@ const REJECTION_REASONS = [
   }
 ];
 
-function getDepartmentKeyboard() {
+function getPaymentTypeKeyboard(lang = 'en') {
+  if (lang === 'am') {
+    return new InlineKeyboard()
+      .text("💳 መደበኛ የትምህርት ክፍያ (Regular)", "paytype_reg").row()
+      .text("🎓 የ 4 ዓመት ሙሉ ክፍያ (Complete)", "paytype_full");
+  }
   return new InlineKeyboard()
-    .text("📈 Marketing", "dept_Marketing Management")
-    .text("💼 Business", "dept_Business Management").row()
-    .text("📊 Accounting & Finance", "dept_Accounting and finance").row()
-    .text("🌾 Agribusiness & VCM", "dept_Agribusiness and Value chain management").row()
-    .text("📚 Ed. Planning & Mgmt", "dept_Educational planning and management").row()
-    .text("🚚 Logistics & SCM", "dept_Logistics and Supply chain management").row()
-    .text("🎓 4-Year Complete Tuition", "dept_4-Year Complete Tuition");
+    .text("💳 Regular Term Tuition", "paytype_reg").row()
+    .text("🎓 4-Year Complete Tuition", "paytype_full");
+}
+
+function getDepartmentKeyboard(planType = 'reg') {
+  const prefix = planType === 'full' ? 'deptfull_' : 'deptreg_';
+  return new InlineKeyboard()
+    .text("📈 Marketing", `${prefix}Marketing Management`)
+    .text("💼 Business", `${prefix}Business Management`).row()
+    .text("📊 Accounting & Finance", `${prefix}Accounting and finance`).row()
+    .text("🌾 Agribusiness & VCM", `${prefix}Agribusiness and Value chain management`).row()
+    .text("📚 Ed. Planning & Mgmt", `${prefix}Educational planning and management`).row()
+    .text("🚚 Logistics & SCM", `${prefix}Logistics and Supply chain management`);
 }
 
 function getStaffKeyboard() {
@@ -206,13 +212,12 @@ function getStudentKeyboard(lang = 'en') {
 
 function getTransferKeyboard(userId) {
   return new InlineKeyboard()
-    .text("📈 Marketing Mgmt", `tr_${userId}_Marketing Management`)
-    .text("💼 Business Mgmt", `tr_${userId}_Business Management`).row()
-    .text("🌾 Agribusiness & VCM", `tr_${userId}_Agribusiness and Value chain management`)
-    .text("📚 Ed. Planning", `tr_${userId}_Educational planning and management`).row()
-    .text("📊 Accounting & Finance", `tr_${userId}_Accounting and finance`)
-    .text("🚚 Logistics & SCM", `tr_${userId}_Logistics and Supply chain management`).row()
-    .text("🎓 4-Year Complete Tuition", `tr_${userId}_4-Year Complete Tuition`);
+    .text("📈 Marketing Mgmt", `tr_${userId}_Marketing Management (Regular / Term)`)
+    .text("💼 Business Mgmt", `tr_${userId}_Business Management (Regular / Term)`).row()
+    .text("🌾 Agribusiness & VCM", `tr_${userId}_Agribusiness and Value chain management (Regular / Term)`)
+    .text("📚 Ed. Planning", `tr_${userId}_Educational planning and management (Regular / Term)`).row()
+    .text("📊 Accounting & Finance", `tr_${userId}_Accounting and finance (Regular / Term)`)
+    .text("🚚 Logistics & SCM", `tr_${userId}_Logistics and Supply chain management (Regular / Term)`);
 }
 
 function getRejectionReasonKeyboard(userId, topicId) {
@@ -225,46 +230,24 @@ function getRejectionReasonKeyboard(userId, topicId) {
 
 bot.catch((err) => console.error('Error in bot framework:', err));
 
-async function getOrCreateDepartmentTopic(ctx, department) {
-  const cached = await pool.query('SELECT topic_id FROM department_topics WHERE department = $1', [department]);
+async function getOrCreateDepartmentTopic(ctx, departmentName) {
+  const baseDepartment = departmentName.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
+
+  const cached = await pool.query('SELECT topic_id FROM department_topics WHERE department = $1', [baseDepartment]);
   if (cached.rows.length > 0) {
     return Number(cached.rows[0].topic_id);
   }
 
-  const newTopic = await ctx.api.createForumTopic(STAFF_GROUP_ID, `📁 [${department}]`);
+  const newTopic = await ctx.api.createForumTopic(STAFF_GROUP_ID, `📁 [${baseDepartment}]`);
   const topicId = newTopic.message_thread_id;
 
   await pool.query(`
     INSERT INTO department_topics (department, topic_id) 
     VALUES ($1, $2) 
     ON CONFLICT(department) DO UPDATE SET topic_id = EXCLUDED.topic_id
-  `, [department, topicId]);
+  `, [baseDepartment, topicId]);
 
   return topicId;
-}
-
-async function getApprovedByDepartmentText() {
-  let output = "📂 **MASTER APPROVED RECEIPTS REPORT**\n\n";
-  for (const dept of DEPARTMENTS) {
-    const res = await pool.query(`
-      SELECT user_id, processed_by, updated_at 
-      FROM tickets 
-      WHERE status = 'APPROVED' AND department = $1
-      ORDER BY updated_at DESC
-    `, [dept]);
-
-    output += `📂 **${dept}** (${res.rows.length})\n`;
-    if (res.rows.length === 0) {
-      output += `  └ _No approved receipts yet_\n\n`;
-    } else {
-      res.rows.forEach((r) => {
-        const staff = r.processed_by ? ` (Approved by: ${r.processed_by})` : "";
-        output += `  ├ User ID: \`${r.user_id}\`${staff}\n`;
-      });
-      output += `\n`;
-    }
-  }
-  return output;
 }
 
 async function generateSummaryText(statusType) {
@@ -300,7 +283,7 @@ async function sendCSVExport(threadId, captionText) {
       return bot.api.sendMessage(STAFF_GROUP_ID, "⚠️ No receipts found to export.", { message_thread_id: threadId });
     }
 
-    let csv = "Student Telegram ID,Username,Department,Status,Rejection Reason,Processed By,Created At,Updated At\n";
+    let csv = "Student Telegram ID,Username,Department & Tag,Status,Rejection Reason,Processed By,Created At,Updated At\n";
     res.rows.forEach((r) => {
       const uname = r.username ? `"${r.username.replace(/"/g, '""')}"` : "";
       const reason = r.rejection_reason ? `"${r.rejection_reason.replace(/"/g, '""')}"` : "";
@@ -439,8 +422,7 @@ bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   );
 });
 
-// --- STAFF BUTTON CALLBACKS ---
-
+// STAFF BUTTON CALLBACKS
 bot.callbackQuery('cmd_lookfor', async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.reply(
@@ -479,8 +461,7 @@ bot.callbackQuery('cmd_broadcast', async (ctx) => {
   );
 });
 
-// --- STUDENT BUTTON CALLBACKS ---
-
+// STUDENT WIZARD & BUTTON CALLBACKS
 bot.callbackQuery('cmd_submit', async (ctx) => {
   await ctx.answerCallbackQuery();
   const userId = ctx.from.id;
@@ -488,8 +469,21 @@ bot.callbackQuery('cmd_submit', async (ctx) => {
   const t = STRINGS[lang];
 
   await ctx.reply(
+    t.selectPlan,
+    { parse_mode: 'Markdown', reply_markup: getPaymentTypeKeyboard(lang) }
+  );
+});
+
+bot.callbackQuery(/^paytype_(reg|full)$/, async (ctx) => {
+  const planType = ctx.match[1];
+  const userId = ctx.from.id;
+  const lang = userLanguages.get(userId) || 'en';
+  const t = STRINGS[lang];
+
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(
     t.selectDept,
-    { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard() }
+    { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard(planType) }
   );
 });
 
@@ -594,29 +588,34 @@ bot.callbackQuery('start_resubmit', async (ctx) => {
   pendingDepartments.delete(userId);
 
   await ctx.reply(
-    t.reuploadPrompt,
-    { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard() }
+    t.selectPlan,
+    { parse_mode: 'Markdown', reply_markup: getPaymentTypeKeyboard(lang) }
   );
 });
 
-bot.callbackQuery(/^dept_(.+)$/, async (ctx) => {
-  const selectedDept = ctx.match[1];
+bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
+  const isFull = ctx.match[1] === 'full';
+  const baseDept = ctx.match[2];
   const userId = ctx.from.id;
   const lang = userLanguages.get(userId) || 'en';
   const t = STRINGS[lang];
 
-  pendingDepartments.set(userId, selectedDept);
+  const fullTaggedDept = isFull 
+    ? `${baseDept} (4-Year Complete)`
+    : `${baseDept} (Regular / Term)`;
+
+  pendingDepartments.set(userId, fullTaggedDept);
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
-    t.sendReceiptPrompt.replace('{dept}', selectedDept),
+    t.sendReceiptPrompt.replace('{dept}', fullTaggedDept),
     { parse_mode: 'Markdown' }
   );
 });
 
 bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
   const targetUserId = Number(ctx.match[1]);
-  const newDept = ctx.match[2];
+  const newDeptTagged = ctx.match[2];
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
   await ctx.answerCallbackQuery();
@@ -633,7 +632,7 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
       }
     }
 
-    const newTopicId = await getOrCreateDepartmentTopic(ctx, newDept);
+    const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged);
 
     try {
       await ctx.api.copyMessage(STAFF_GROUP_ID, STAFF_GROUP_ID, Number(ticket.message_id), {
@@ -647,7 +646,7 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
 
       const newTicketMsg = await ctx.api.sendMessage(
         STAFF_GROUP_ID,
-        `📥 New Transferred Submission\n• Student ID: ${targetUserId}\n• Department: ${newDept}\n• Transferred by: ${staffName}`,
+        `📥 New Transferred Submission\n• Student ID: ${targetUserId}\n• Department: ${newDeptTagged}\n• Transferred by: ${staffName}`,
         { message_thread_id: newTopicId, reply_markup: actionKeyboard }
       );
 
@@ -655,14 +654,14 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
         UPDATE tickets 
         SET department = $1, topic_id = $2, ticket_msg_id = $3, updated_at = CURRENT_TIMESTAMP 
         WHERE user_id = $4
-      `, [newDept, newTopicId, newTicketMsg.message_id, targetUserId]);
+      `, [newDeptTagged, newTopicId, newTicketMsg.message_id, targetUserId]);
 
       try {
         const studentLang = userLanguages.get(targetUserId) || 'en';
         const t = STRINGS[studentLang];
         await ctx.api.sendMessage(
           targetUserId,
-          t.deptUpdated.replace('{dept}', newDept),
+          t.deptUpdated.replace('{dept}', newDeptTagged),
           { parse_mode: 'Markdown' }
         );
       } catch (studentErr) {
@@ -675,15 +674,12 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
   }
 
   await ctx.editMessageText(
-    `🔄 Student receipt (ID: \`${targetUserId}\`) successfully transferred to **${newDept}** by **${staffName}**.`,
+    `🔄 Student receipt (ID: \`${targetUserId}\`) successfully transferred to **${newDeptTagged}** by **${staffName}**.`,
     { parse_mode: 'Markdown' }
   );
 });
 
-// -------------------------------------------------------------
 // MESSAGE & FORCE-REPLY INPUT LISTENER
-// -------------------------------------------------------------
-
 bot.on('message', async (ctx) => {
   if (ctx.from && ctx.from.is_bot) return;
 
@@ -691,7 +687,6 @@ bot.on('message', async (ctx) => {
   const isPrivate = ctx.chat.type === 'private';
   const topicId = ctx.message.message_thread_id;
 
-  // Handle staff interactive replies
   if (isStaffGroup && ctx.message.reply_to_message) {
     const originalMsg = ctx.message.reply_to_message;
 
@@ -708,7 +703,6 @@ bot.on('message', async (ctx) => {
     }
   }
 
-  // Handle student payment submissions
   if (isPrivate) {
     const userId = ctx.from.id;
     const lang = userLanguages.get(userId) || 'en';
@@ -724,7 +718,7 @@ bot.on('message', async (ctx) => {
     }
 
     const username = ctx.from.username || ctx.from.first_name || 'Unknown';
-    const chosenDept = pendingDepartments.get(userId) || "4-Year Complete Tuition";
+    const chosenDeptTagged = pendingDepartments.get(userId) || "General (Regular / Term)";
     
     const fileId = ctx.message.photo 
       ? ctx.message.photo[ctx.message.photo.length - 1].file_id 
@@ -736,7 +730,7 @@ bot.on('message', async (ctx) => {
     }
 
     try {
-      const topicId = await getOrCreateDepartmentTopic(ctx, chosenDept);
+      const topicId = await getOrCreateDepartmentTopic(ctx, chosenDeptTagged);
 
       const forwardRes = await ctx.api.copyMessage(STAFF_GROUP_ID, ctx.chat.id, ctx.message.message_id, {
         message_thread_id: topicId
@@ -750,14 +744,14 @@ bot.on('message', async (ctx) => {
 
       const sentTicketMsg = await ctx.api.sendMessage(
         STAFF_GROUP_ID,
-        `📥 New Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${chosenDept}`,
+        `📥 New Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${chosenDeptTagged}`,
         { message_thread_id: topicId, reply_markup: actionKeyboard }
       );
 
       await pool.query(`
         INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, department, status) 
         VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
-      `, [userId, username, fileId, topicId, forwardedMsgId, sentTicketMsg.message_id, chosenDept]);
+      `, [userId, username, fileId, topicId, forwardedMsgId, sentTicketMsg.message_id, chosenDeptTagged]);
 
       pendingDepartments.delete(userId);
 
@@ -797,7 +791,7 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   await ctx.editMessageText(`✅ Receipt approved by **${staffName}**.`, { parse_mode: 'Markdown' });
 
   if (APPROVED_THREAD_ID) {
-    const sortedReport = await getApprovedByDepartmentText();
+    const sortedReport = await generateSummaryText('APPROVED');
     await ctx.api.sendMessage(STAFF_GROUP_ID, sortedReport, { message_thread_id: APPROVED_THREAD_ID, parse_mode: 'Markdown' });
   }
 });
@@ -865,7 +859,6 @@ bot.callbackQuery(/^trans_(\d+)$/, async (ctx) => {
   });
 });
 
-// Daily Summary Scheduler
 cron.schedule('0 8 * * *', async () => {
   try {
     const appSummary = await generateSummaryText('APPROVED');
@@ -888,25 +881,18 @@ app.get('/', (req, res) => {
   res.send('Tuition Receipt Bot is active');
 });
 
-// -------------------------------------------------------------
-// BOT INITIALIZATION WITH COMMAND CLEANUP
-// -------------------------------------------------------------
-
 async function main() {
   await initDB();
 
   try {
-    // Delete cached slash commands across private and group chats
     await bot.api.deleteMyCommands();
     await bot.api.deleteMyCommands({ scope: { type: 'all_private_chats' } });
     await bot.api.deleteMyCommands({ scope: { type: 'all_group_chats' } });
 
-    // Register clean panel commands
     await bot.api.setMyCommands([
       { command: 'start', description: 'Start payment receipt submission' },
       { command: 'panel', description: 'Open interactive action panel' }
     ]);
-    console.log("Cached commands deleted and clean panel commands registered.");
   } catch (cmdErr) {
     console.error("Failed to register bot commands:", cmdErr.message);
   }
@@ -920,7 +906,6 @@ async function main() {
 
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
-    console.log("Tuition Receipt Bot is online and ready!");
   });
 }
 
