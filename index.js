@@ -604,18 +604,9 @@ bot.on('message', async (ctx) => {
     }
   } 
   else if (isStaffGroup) {
-    const topicId = ctx.message.message_thread_id; 
-    const text = (ctx.message.text || "").trim();
-    const lowerText = text.toLowerCase();
-
-    if (lowerText === 'stats') {
-      const appSummary = await generateSummaryText('APPROVED');
-      const rejSummary = await generateSummaryText('REJECTED');
-      return ctx.reply(`${appSummary}\n\n---\n\n${rejSummary}`, { message_thread_id: topicId, parse_mode: 'Markdown' });
-    }
-
-    if (lowerText === 'export') {
-      return sendCSVExport(topicId, "📄 **Receipt Audit Export**");
+    // Strictly require a slash '/' for all commands in the staff group
+    if (!ctx.message.text || !ctx.message.text.startsWith('/')) {
+      return;
     }
   }
 });
