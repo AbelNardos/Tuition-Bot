@@ -3,7 +3,7 @@ const express = require('express');
 const { Bot, InlineKeyboard, InputFile, webhookCallback } = require('grammy');
 const { Pool } = require('pg');
 const fs = require('fs');
-const path = path = require('path');
+const path = require('path');
 const https = require('https');
 const cron = require('node-cron');
 
