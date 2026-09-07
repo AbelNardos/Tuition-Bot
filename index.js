@@ -5,6 +5,7 @@ const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const PDFDocument = require('pdfkit');
 
 const app = express();
 app.use(express.json());
@@ -102,7 +103,7 @@ const STRINGS = {
     receiptReceived: "✅ Your receipt has been sent to the staff review team. We will notify you once verified.",
     sendReceiptPrompt: "✅ Selected Department: **{dept}**\n\nNow, please send your receipt photo or screenshot with your Full Name and Student ID.",
     reuploadPrompt: "🔄 **Re-submitting Receipt**\nPlease choose your department to initiate a new submission:",
-    approvedMsg: "✅ **Receipt Verified!**\nYour payment submission has been approved. Thank you!",
+    approvedMsg: "✅ **Receipt Verified!**\nYour payment submission has been approved. Below is your official PDF payment slip.",
     rejectedMsg: "❌ **Receipt Rejected**\n\n**Reason:** {reason}\n\n{message}",
     reuploadBtn: "🔄 Re-upload Receipt",
     noFileErr: "⚠️ Please send an actual **photo or screenshot** of your payment receipt. Text-only messages cannot be processed as receipts.",
@@ -114,7 +115,7 @@ const STRINGS = {
     receiptReceived: "✅ ደረሰኝዎ ለክትትል ቡድኑ ተልኳል። እንደተረጋገጠ እናሳውቅዎታለን።",
     sendReceiptPrompt: "✅ የተመረጠው ትምህርት ክፍል፡ **{dept}**\n\nአሁን እባክዎን የክፍያ ደረሰኝ ፎቶዎን ከሙሉ ስምዎ እና የተማሪ ID ጋር ይላኩ።",
     reuploadPrompt: "🔄 **ደረሰኝ እንደገና መላክ**\nእባክዎን አዲስ ማመልከቻ ለመጀመር ትምህርት ክፍልዎን ይምረጡ፡",
-    approvedMsg: "✅ **ደረሰኝዎ ተረጋግጧል!**\nየክፍያ ማረጋገጫዎ ጸድቋል። እናመሰግናለን!",
+    approvedMsg: "✅ **ደረሰኝዎ ተረጋግጧል!**\nየክፍያ ማረጋገጫዎ ጸድቋል። ከታች ኦፊሴላዊ የክፍያ ደረሰኝ ሰነድዎን (PDF) ያገኛሉ።",
     rejectedMsg: "❌ **ደረሰኝዎ ውድቅ ተደርጓል**\n\n**ምክንያት:** {reason}\n\n{message}",
     reuploadBtn: "🔄 ደረሰኝ እንደገና ስቀል",
     noFileErr: "⚠️ እባክዎን ትክክለኛ የክፍያ ደረሰኝ **ፎቶ ወይም ስክሪንሾት** ይላኩ። በጽሁፍ ብቻ የሚላክ መረጃ አይቀበልም።",
@@ -122,7 +123,7 @@ const STRINGS = {
   }
 };
 
-// Rejection Reasons with Context-Specific Guidance in EN & AM
+// Rejection Reasons
 const REJECTION_REASONS = [
   { 
     label: "📷 Blurry/Unreadable Receipt", 
@@ -149,6 +150,63 @@ const REJECTION_REASONS = [
     message_am: "በደረሰኙ ላይ ያለው ስም ወይም የተማሪ መታወቂያ ከተመዘገበው መረጃ ጋር አይመሳሰልም። እባክዎን ትክክለኛ መረጃ ያለው ደረሰኝ ይላኩ ወይም የአስተዳደር ክፍሉን ያነጋግሩ።"
   }
 ];
+
+// PDF Receipt Generator Function
+function generatePaymentReceiptPDF(data) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 50 });
+    const buffers = [];
+
+    doc.on('data', buffers.push.bind(buffers));
+    doc.on('end', () => resolve(Buffer.concat(buffers)));
+    doc.on('error', reject);
+
+    // Header / Branding
+    doc.fillColor('#1A365D')
+       .fontSize(22)
+       .text('TUITION PAYMENT RECEIPT', { align: 'center', bold: true });
+    doc.moveDown(0.3);
+
+    doc.fillColor('#4A5568')
+       .fontSize(10)
+       .text('OFFICIAL STATEMENT OF PAYMENT VERIFICATION', { align: 'center' });
+    doc.moveDown(1.5);
+
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#CBD5E0').stroke();
+    doc.moveDown(1.5);
+
+    // Ticket Details Table
+    doc.fontSize(12).fillColor('#2D3748');
+
+    const details = [
+      ['Verification Code:', `VER-${data.userId}-${Date.now().toString().slice(-6)}`],
+      ['Student Telegram ID:', `${data.userId}`],
+      ['Username:', `@${data.username}`],
+      ['Department:', `${data.department}`],
+      ['Status:', 'APPROVED / VERIFIED'],
+      ['Verified By:', `${data.processedBy}`],
+      ['Date Issued:', `${new Date().toUTCString()}`]
+    ];
+
+    details.forEach(([label, value]) => {
+      doc.font('Helvetica-Bold').text(label, 60, doc.y, { continued: true, width: 150 });
+      doc.font('Helvetica').text(`  ${value}`);
+      doc.moveDown(0.8);
+    });
+
+    doc.moveDown(1.5);
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#CBD5E0').stroke();
+    doc.moveDown(1.5);
+
+    // Footer
+    doc.fontSize(9).fillColor('#718096')
+       .text('This document confirms that the submitted payment receipt has been formally verified and logged in the database.', { align: 'center' })
+       .moveDown(0.5)
+       .text('Keep a copy of this digital receipt for your academic records.', { align: 'center' });
+
+    doc.end();
+  });
+}
 
 function getTransferKeyboard(userId) {
   return new InlineKeyboard()
@@ -401,7 +459,6 @@ bot.on('message:photo', async (ctx) => {
 
   const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
 
-  // Save temp confirmation data
   pendingConfirmations.set(userId, {
     fileId: fileId,
     department: chosenDept,
@@ -554,7 +611,6 @@ bot.on('message', async (ctx) => {
 
     if (ctx.message.text && ctx.message.text.startsWith('/')) return;
 
-    // Direct text message handler warning
     if (!ctx.message.photo) {
       await ctx.reply(t.noFileErr, { parse_mode: 'Markdown' });
       return;
@@ -577,6 +633,7 @@ bot.on('message', async (ctx) => {
   }
 });
 
+// Approval Handler with PDF Generator Integration
 bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   const userId = Number(ctx.match[1]);
   const topicId = Number(ctx.match[2]);
@@ -585,7 +642,7 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   
   const updateRes = await pool.query(
-    "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING'",
+    "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING username, department",
     [staffName, userId]
   );
   
@@ -593,16 +650,32 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
     return ctx.reply("⚠️ Error: Could not find an active pending ticket record in the database for this user.", { message_thread_id: topicId });
   }
 
+  const ticketData = updateRes.rows[0];
   const lang = userLanguages.get(userId) || 'en';
   const t = STRINGS[lang];
 
-  await ctx.api.sendMessage(
-    userId,
-    t.approvedMsg,
-    { parse_mode: 'Markdown' }
-  );
+  try {
+    // Generate PDF Buffer
+    const pdfBuffer = await generatePaymentReceiptPDF({
+      userId: userId,
+      username: ticketData.username || 'N/A',
+      department: ticketData.department,
+      processedBy: staffName
+    });
 
-  await ctx.editMessageText(`✅ Receipt approved by **${staffName}**.`, { parse_mode: 'Markdown' });
+    // Send document to student
+    await ctx.api.sendDocument(
+      userId,
+      new InputFile(pdfBuffer, `Payment_Slip_${userId}.pdf`),
+      { caption: t.approvedMsg, parse_mode: 'Markdown' }
+    );
+  } catch (pdfErr) {
+    console.error("Failed to generate or send PDF slip:", pdfErr);
+    // Fallback text message if PDF generation fails
+    await ctx.api.sendMessage(userId, t.approvedMsg, { parse_mode: 'Markdown' });
+  }
+
+  await ctx.editMessageText(`✅ Receipt approved by **${staffName}**. PDF slip generated and sent to student.`, { parse_mode: 'Markdown' });
 
   if (APPROVED_THREAD_ID) {
     const sortedReport = await getApprovedByDepartmentText();
