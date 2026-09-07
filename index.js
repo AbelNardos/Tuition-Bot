@@ -3,7 +3,7 @@ const express = require('express');
 const { Bot, InlineKeyboard, InputFile, webhookCallback } = require('grammy');
 const { Pool } = require('pg');
 const fs = require('fs');
-const path = require('path');
+const path = path = require('path');
 const https = require('https');
 const cron = require('node-cron');
 
@@ -727,6 +727,18 @@ app.get('/', (req, res) => {
 
 async function main() {
   await initDB();
+
+  // Automatically register bot commands in Telegram's UI menu
+  try {
+    await bot.api.setMyCommands([
+      { command: 'start', description: 'Start payment receipt submission' },
+      { command: 'status', description: 'Check your current submission status' },
+      { command: 'myhistory', description: 'View your payment submission history' }
+    ]);
+    console.log("Bot commands registered successfully with Telegram.");
+  } catch (cmdErr) {
+    console.error("Failed to register bot commands:", cmdErr.message);
+  }
 
   const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL; 
   if (RENDER_EXTERNAL_URL) {
