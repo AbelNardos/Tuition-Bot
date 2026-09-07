@@ -5,7 +5,6 @@ const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
-const PDFDocument = require('pdfkit');
 
 const app = express();
 app.use(express.json());
@@ -83,7 +82,7 @@ async function initDB() {
 
 const pendingDepartments = new Map();
 const userLanguages = new Map(); // Stores userId -> 'en' | 'am'
-const pendingConfirmations = new Map(); // Stores userId -> { fileId, department, originalMsgId }
+const sessionTimers = new Map(); // Stores userId -> setTimeout reference
 
 const DEPARTMENTS = [
   "Marketing Management",
@@ -103,11 +102,13 @@ const STRINGS = {
     receiptReceived: "✅ Your receipt has been sent to the staff review team. We will notify you once verified.",
     sendReceiptPrompt: "✅ Selected Department: **{dept}**\n\nNow, please send your receipt photo or screenshot with your Full Name and Student ID.",
     reuploadPrompt: "🔄 **Re-submitting Receipt**\nPlease choose your department to initiate a new submission:",
-    approvedMsg: "✅ **Receipt Verified!**\nYour payment submission has been approved. Below is your official PDF payment slip.",
+    approvedMsg: "✅ **Receipt Verified!**\nYour payment submission has been approved. Thank you!",
     rejectedMsg: "❌ **Receipt Rejected**\n\n**Reason:** {reason}\n\n{message}",
     reuploadBtn: "🔄 Re-upload Receipt",
     noFileErr: "⚠️ Please send an actual **photo or screenshot** of your payment receipt. Text-only messages cannot be processed as receipts.",
-    deptUpdated: "🔄 **Department Updated**\nYour receipt submission has been transferred to **{dept}**. Our review team will process your payment under this department."
+    deptUpdated: "🔄 **Department Updated**\nYour receipt submission has been transferred to **{dept}**. Our review team will process your payment under this department.",
+    pendingExists: "⚠️ **Active Submission Pending**\n\nYou already have a receipt under review. Please wait for staff verification or check your status using /status before submitting a new one.",
+    sessionExpired: "⏱️ **Session Expired**\n\nYour department selection has timed out due to inactivity. Please use /start to begin again."
   },
   am: {
     welcome: "👋 **እንኳን ወደ ክፍያ መላኪያ ቦት በሰላም መጡ!**\n\nእባክዎን ደረሰኝዎን ከመላክዎ በፊት **ትምህርት ክፍልዎን (Department)** ይምረጡ፡",
@@ -115,15 +116,17 @@ const STRINGS = {
     receiptReceived: "✅ ደረሰኝዎ ለክትትል ቡድኑ ተልኳል። እንደተረጋገጠ እናሳውቅዎታለን።",
     sendReceiptPrompt: "✅ የተመረጠው ትምህርት ክፍል፡ **{dept}**\n\nአሁን እባክዎን የክፍያ ደረሰኝ ፎቶዎን ከሙሉ ስምዎ እና የተማሪ ID ጋር ይላኩ።",
     reuploadPrompt: "🔄 **ደረሰኝ እንደገና መላክ**\nእባክዎን አዲስ ማመልከቻ ለመጀመር ትምህርት ክፍልዎን ይምረጡ፡",
-    approvedMsg: "✅ **ደረሰኝዎ ተረጋግጧል!**\nየክፍያ ማረጋገጫዎ ጸድቋል። ከታች ኦፊሴላዊ የክፍያ ደረሰኝ ሰነድዎን (PDF) ያገኛሉ።",
+    approvedMsg: "✅ **ደረሰኝዎ ተረጋግጧል!**\nየክፍያ ማረጋገጫዎ ጸድቋል። እናመሰግናለን!",
     rejectedMsg: "❌ **ደረሰኝዎ ውድቅ ተደርጓል**\n\n**ምክንያት:** {reason}\n\n{message}",
     reuploadBtn: "🔄 ደረሰኝ እንደገና ስቀል",
     noFileErr: "⚠️ እባክዎን ትክክለኛ የክፍያ ደረሰኝ **ፎቶ ወይም ስክሪንሾት** ይላኩ። በጽሁፍ ብቻ የሚላክ መረጃ አይቀበልም።",
-    deptUpdated: "🔄 **ትምህርት ክፍል ተቀይሯል**\nየደረሰኝ ማመልከቻዎ ወደ **{dept}** ተዛውሯል። መረጃዎ በዚህ ትምህርት ክፍል ስር የሚታይ ይሆናል።"
+    deptUpdated: "🔄 **ትምህርት ክፍል ተቀይሯል**\nየደረሰኝ ማመልከቻዎ ወደ **{dept}** ተዛውሯል። መረጃዎ በዚህ ትምህርት ክፍል ስር የሚታይ ይሆናል።",
+    pendingExists: "⚠️ **አሁንም በሂደት ላይ ያለ ማመልከቻ አለ**\n\nቀደም ሲል የላኩት ደረሰኝ በመገምገም ላይ ይገኛል። እባክዎን የቡድኑን ምላሽ ይጠብቁ ወይም ሁኔታውን በ /status ይመልከቱ።",
+    sessionExpired: "⏱️ **ጊዜው አልፏል**\n\nለረጅም ጊዜ ባለመላክዎ ምክንያት የተመረጠው ትምህርት ክፍል ተሰርዟል። እባክዎን እንደገና ለመጀመር /start ን ይጫኑ።"
   }
 };
 
-// Rejection Reasons
+// Rejection Reasons with Context-Specific Guidance in EN & AM
 const REJECTION_REASONS = [
   { 
     label: "📷 Blurry/Unreadable Receipt", 
@@ -150,63 +153,6 @@ const REJECTION_REASONS = [
     message_am: "በደረሰኙ ላይ ያለው ስም ወይም የተማሪ መታወቂያ ከተመዘገበው መረጃ ጋር አይመሳሰልም። እባክዎን ትክክለኛ መረጃ ያለው ደረሰኝ ይላኩ ወይም የአስተዳደር ክፍሉን ያነጋግሩ።"
   }
 ];
-
-// PDF Receipt Generator Function
-function generatePaymentReceiptPDF(data) {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 50 });
-    const buffers = [];
-
-    doc.on('data', buffers.push.bind(buffers));
-    doc.on('end', () => resolve(Buffer.concat(buffers)));
-    doc.on('error', reject);
-
-    // Header / Branding
-    doc.fillColor('#1A365D')
-       .fontSize(22)
-       .text('TUITION PAYMENT RECEIPT', { align: 'center', bold: true });
-    doc.moveDown(0.3);
-
-    doc.fillColor('#4A5568')
-       .fontSize(10)
-       .text('OFFICIAL STATEMENT OF PAYMENT VERIFICATION', { align: 'center' });
-    doc.moveDown(1.5);
-
-    doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#CBD5E0').stroke();
-    doc.moveDown(1.5);
-
-    // Ticket Details Table
-    doc.fontSize(12).fillColor('#2D3748');
-
-    const details = [
-      ['Verification Code:', `VER-${data.userId}-${Date.now().toString().slice(-6)}`],
-      ['Student Telegram ID:', `${data.userId}`],
-      ['Username:', `@${data.username}`],
-      ['Department:', `${data.department}`],
-      ['Status:', 'APPROVED / VERIFIED'],
-      ['Verified By:', `${data.processedBy}`],
-      ['Date Issued:', `${new Date().toUTCString()}`]
-    ];
-
-    details.forEach(([label, value]) => {
-      doc.font('Helvetica-Bold').text(label, 60, doc.y, { continued: true, width: 150 });
-      doc.font('Helvetica').text(`  ${value}`);
-      doc.moveDown(0.8);
-    });
-
-    doc.moveDown(1.5);
-    doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#CBD5E0').stroke();
-    doc.moveDown(1.5);
-
-    // Footer
-    doc.fontSize(9).fillColor('#718096')
-       .text('This document confirms that the submitted payment receipt has been formally verified and logged in the database.', { align: 'center' })
-       .moveDown(0.5)
-       .text('Keep a copy of this digital receipt for your academic records.', { align: 'center' });
-
-    doc.end();
-  });
-}
 
 function getTransferKeyboard(userId) {
   return new InlineKeyboard()
@@ -338,8 +284,13 @@ function getDepartmentKeyboard() {
 }
 
 bot.command('start', async (ctx) => {
-  pendingDepartments.delete(ctx.from.id);
-  pendingConfirmations.delete(ctx.from.id);
+  const userId = ctx.from.id;
+  pendingDepartments.delete(userId);
+
+  if (sessionTimers.has(userId)) {
+    clearTimeout(sessionTimers.get(userId));
+    sessionTimers.delete(userId);
+  }
 
   const langKeyboard = new InlineKeyboard()
     .text("🇬🇧 English", "lang_en")
@@ -419,7 +370,11 @@ bot.callbackQuery('start_resubmit', async (ctx) => {
   const t = STRINGS[lang];
 
   pendingDepartments.delete(userId);
-  pendingConfirmations.delete(userId);
+  if (sessionTimers.has(userId)) {
+    clearTimeout(sessionTimers.get(userId));
+    sessionTimers.delete(userId);
+  }
+
   await ctx.reply(
     t.reuploadPrompt,
     { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard() }
@@ -432,106 +387,32 @@ bot.callbackQuery(/^dept_(.+)$/, async (ctx) => {
   const lang = userLanguages.get(userId) || 'en';
   const t = STRINGS[lang];
   
+  if (sessionTimers.has(userId)) {
+    clearTimeout(sessionTimers.get(userId));
+  }
+
   pendingDepartments.set(userId, selectedDept);
+
+  // Set 15-minute auto-timeout
+  const timer = setTimeout(async () => {
+    if (pendingDepartments.has(userId)) {
+      pendingDepartments.delete(userId);
+      sessionTimers.delete(userId);
+      try {
+        await bot.api.sendMessage(userId, t.sessionExpired, { parse_mode: 'Markdown' });
+      } catch (err) {
+        console.error("Could not send session timeout message:", err);
+      }
+    }
+  }, 15 * 60 * 1000);
+
+  sessionTimers.set(userId, timer);
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(
     t.sendReceiptPrompt.replace('{dept}', selectedDept),
     { parse_mode: 'Markdown' }
   );
-});
-
-// Photo upload handler with confirmation preview
-bot.on('message:photo', async (ctx) => {
-  const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
-  if (isStaffGroup) return;
-
-  const userId = ctx.from.id;
-  const lang = userLanguages.get(userId) || 'en';
-  const chosenDept = pendingDepartments.get(userId);
-
-  if (!chosenDept) {
-    const msg = lang === 'am' 
-      ? "⚠️ እባክዎን አስቀድመው /start በመጫን ትምህርት ክፍልዎን ይምረጡ።"
-      : "⚠️ Please select your department first by typing /start.";
-    return ctx.reply(msg);
-  }
-
-  const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-
-  pendingConfirmations.set(userId, {
-    fileId: fileId,
-    department: chosenDept,
-    originalMsgId: ctx.message.message_id
-  });
-
-  const confirmKb = new InlineKeyboard()
-    .text(lang === 'am' ? "✅ አረጋግጥ እና ላክ" : "✅ Confirm & Submit", "confirm_student_upload")
-    .row()
-    .text(lang === 'am' ? "🔄 እንደገና ምረጽ" : "🔄 Change Dept / Retake", "start_resubmit");
-
-  const previewText = lang === 'am'
-    ? `📋 **እባክዎን ማመልከቻዎን ያረጋግጡ**\n\n• **ትምህርት ክፍል:** ${chosenDept}\n• **የተማሪ ID:** \`${userId}\`\n\nይህ ደረሰኝ ለክትትል ቡድኑ እንዲላክ ይፈልጋሉ?`
-    : `📋 **Please Confirm Your Submission**\n\n• **Department:** ${chosenDept}\n• **Student ID:** \`${userId}\`\n\nAre you ready to submit this receipt for review?`;
-
-  await ctx.replyWithPhoto(fileId, {
-    caption: previewText,
-    parse_mode: 'Markdown',
-    reply_markup: confirmKb
-  });
-});
-
-// Final receipt confirmation processor
-bot.callbackQuery('confirm_student_upload', async (ctx) => {
-  const userId = ctx.from.id;
-  const username = ctx.from.username || ctx.from.first_name || 'Unknown';
-  const lang = userLanguages.get(userId) || 'en';
-  const t = STRINGS[lang];
-
-  const pendingData = pendingConfirmations.get(userId);
-
-  if (!pendingData) {
-    await ctx.answerCallbackQuery({ text: "Session expired. Please re-upload your receipt.", show_alert: true });
-    return;
-  }
-
-  await ctx.answerCallbackQuery();
-
-  try {
-    const topicId = await getOrCreateDepartmentTopic(ctx, pendingData.department);
-
-    const forwardRes = await ctx.api.copyMessage(STAFF_GROUP_ID, ctx.chat.id, pendingData.originalMsgId, {
-      message_thread_id: topicId
-    });
-
-    const actionKeyboard = new InlineKeyboard()
-      .text("✅ Approve", `app_${userId}_${topicId}`).row()
-      .text("❌ Reject", `rej_${userId}_${topicId}`).row()
-      .text("🔄 Transfer Dept", `trans_${userId}`);
-
-    const sentTicketMsg = await ctx.api.sendMessage(
-      STAFF_GROUP_ID,
-      `📥 New Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${pendingData.department}`,
-      { message_thread_id: topicId, reply_markup: actionKeyboard }
-    );
-
-    await pool.query(`
-      INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, department, status) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
-    `, [userId, username, pendingData.fileId, topicId, forwardRes.message_id, sentTicketMsg.message_id, pendingData.department]);
-
-    pendingDepartments.delete(userId);
-    pendingConfirmations.delete(userId);
-
-    await ctx.editMessageCaption({
-      caption: t.receiptReceived,
-      parse_mode: 'Markdown'
-    });
-
-  } catch (err) {
-    console.error("Failed to forward confirmed receipt:", err);
-    await ctx.reply(`❌ Error submitting receipt: ${err.message}`);
-  }
 });
 
 bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
@@ -604,16 +485,70 @@ bot.on('message', async (ctx) => {
   if (ctx.from && ctx.from.is_bot) return;
 
   const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
+  if (!isStaffGroup && ctx.message.text && ctx.message.text.startsWith('/')) return;
 
   if (!isStaffGroup) {
-    const lang = userLanguages.get(ctx.from.id) || 'en';
+    const userId = ctx.from.id;
+    const lang = userLanguages.get(userId) || 'en';
     const t = STRINGS[lang];
 
-    if (ctx.message.text && ctx.message.text.startsWith('/')) return;
+    // Rate Limit Check: Block upload if user already has an active PENDING ticket
+    const activeCheck = await pool.query(
+      "SELECT 1 FROM tickets WHERE user_id = $1 AND status = 'PENDING' LIMIT 1",
+      [userId]
+    );
 
-    if (!ctx.message.photo) {
+    if (activeCheck.rows.length > 0) {
+      return ctx.reply(t.pendingExists, { parse_mode: 'Markdown' });
+    }
+
+    const username = ctx.from.username || ctx.from.first_name || 'Unknown';
+    const chosenDept = pendingDepartments.get(userId) || "4-Year Complete Tuition";
+    
+    const fileId = ctx.message.photo 
+      ? ctx.message.photo[ctx.message.photo.length - 1].file_id 
+      : (ctx.message.document ? ctx.message.document.file_id : null);
+
+    if (!fileId) {
       await ctx.reply(t.noFileErr, { parse_mode: 'Markdown' });
       return;
+    }
+
+    try {
+      const topicId = await getOrCreateDepartmentTopic(ctx, chosenDept);
+
+      const forwardRes = await ctx.api.copyMessage(STAFF_GROUP_ID, ctx.chat.id, ctx.message.message_id, {
+        message_thread_id: topicId
+      });
+      const forwardedMsgId = forwardRes.message_id;
+
+      const actionKeyboard = new InlineKeyboard()
+        .text("✅ Approve", `app_${userId}_${topicId}`).row()
+        .text("❌ Reject", `rej_${userId}_${topicId}`).row()
+        .text("🔄 Transfer Dept", `trans_${userId}`);
+
+      const sentTicketMsg = await ctx.api.sendMessage(
+        STAFF_GROUP_ID,
+        `📥 New Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${chosenDept}`,
+        { message_thread_id: topicId, reply_markup: actionKeyboard }
+      );
+
+      await pool.query(`
+        INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, department, status) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
+      `, [userId, username, fileId, topicId, forwardedMsgId, sentTicketMsg.message_id, chosenDept]);
+
+      // Clear pending state and timer on successful upload
+      pendingDepartments.delete(userId);
+      if (sessionTimers.has(userId)) {
+        clearTimeout(sessionTimers.get(userId));
+        sessionTimers.delete(userId);
+      }
+
+      await ctx.reply(t.receiptReceived, { parse_mode: 'Markdown' });
+    } catch (err) {
+      console.error("Failed to forward receipt:", err);
+      return ctx.reply(`❌ Error submitting receipt: ${err.message}`);
     }
   } 
   else if (isStaffGroup) {
@@ -633,7 +568,6 @@ bot.on('message', async (ctx) => {
   }
 });
 
-// Approval Handler with PDF Generator Integration
 bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   const userId = Number(ctx.match[1]);
   const topicId = Number(ctx.match[2]);
@@ -642,7 +576,7 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   
   const updateRes = await pool.query(
-    "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING username, department",
+    "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING'",
     [staffName, userId]
   );
   
@@ -650,32 +584,16 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
     return ctx.reply("⚠️ Error: Could not find an active pending ticket record in the database for this user.", { message_thread_id: topicId });
   }
 
-  const ticketData = updateRes.rows[0];
   const lang = userLanguages.get(userId) || 'en';
   const t = STRINGS[lang];
 
-  try {
-    // Generate PDF Buffer
-    const pdfBuffer = await generatePaymentReceiptPDF({
-      userId: userId,
-      username: ticketData.username || 'N/A',
-      department: ticketData.department,
-      processedBy: staffName
-    });
+  await ctx.api.sendMessage(
+    userId,
+    t.approvedMsg,
+    { parse_mode: 'Markdown' }
+  );
 
-    // Send document to student
-    await ctx.api.sendDocument(
-      userId,
-      new InputFile(pdfBuffer, `Payment_Slip_${userId}.pdf`),
-      { caption: t.approvedMsg, parse_mode: 'Markdown' }
-    );
-  } catch (pdfErr) {
-    console.error("Failed to generate or send PDF slip:", pdfErr);
-    // Fallback text message if PDF generation fails
-    await ctx.api.sendMessage(userId, t.approvedMsg, { parse_mode: 'Markdown' });
-  }
-
-  await ctx.editMessageText(`✅ Receipt approved by **${staffName}**. PDF slip generated and sent to student.`, { parse_mode: 'Markdown' });
+  await ctx.editMessageText(`✅ Receipt approved by **${staffName}**.`, { parse_mode: 'Markdown' });
 
   if (APPROVED_THREAD_ID) {
     const sortedReport = await getApprovedByDepartmentText();
