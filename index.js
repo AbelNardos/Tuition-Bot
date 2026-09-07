@@ -36,7 +36,7 @@ setInterval(() => {
       console.error('Keep-alive ping error:', err.message);
     });
   }
-}, 8 * 60 * 1000); // Self-pings every 8 minutes
+}, 8 * 60 * 1000);
 
 // PostgreSQL Connection
 const pool = new Pool({
@@ -81,8 +81,22 @@ async function initDB() {
   `);
 }
 
+// Global Middleware: Strip bot username prefix from ctx.match if present
+bot.use(async (ctx, next) => {
+  if (ctx.message && ctx.message.text && ctx.match) {
+    const botUsername = ctx.me?.username;
+    if (botUsername && typeof ctx.match === 'string') {
+      let trimmed = ctx.match.trim();
+      if (trimmed.toLowerCase().startsWith(`@${botUsername.toLowerCase()}`)) {
+        ctx.match = trimmed.substring(botUsername.length + 1).trim();
+      }
+    }
+  }
+  await next();
+});
+
 const pendingDepartments = new Map();
-const userLanguages = new Map(); // Stores userId -> 'en' | 'am'
+const userLanguages = new Map();
 
 const DEPARTMENTS = [
   "Marketing Management",
@@ -94,7 +108,6 @@ const DEPARTMENTS = [
   "4-Year Complete Tuition"
 ];
 
-// Localized UI Dictionary
 const STRINGS = {
   en: {
     welcome: "👋 **Welcome to the Tuition Payment Portal!**\n\nPlease select your **Department** below before sending your receipt and details:",
@@ -124,7 +137,6 @@ const STRINGS = {
   }
 };
 
-// Rejection Reasons
 const REJECTION_REASONS = [
   { 
     label: "📷 Blurry/Unreadable Receipt", 
@@ -402,6 +414,7 @@ bot.command('broadcast', async (ctx) => {
   if (!isStaffGroup) return;
 
   const broadcastMsg = ctx.match ? ctx.match.trim() : '';
+
   if (!broadcastMsg) {
     return ctx.reply("⚠️ Usage: `/broadcast <your announcement message here>`", { parse_mode: 'Markdown' });
   }
@@ -431,15 +444,7 @@ bot.command('lookfor', async (ctx) => {
   if (!isStaffGroup) return;
 
   const topicId = ctx.message.message_thread_id;
-
-  // Clean off the bot username if Telegram appends it (e.g. /lookfor@RENGLO2BOT query)
-  let rawMatch = ctx.match ? ctx.match.trim() : '';
-  const botUsername = ctx.me?.username;
-  if (botUsername && rawMatch.toLowerCase().startsWith(`@${botUsername.toLowerCase()}`)) {
-    rawMatch = rawMatch.substring(botUsername.length + 1).trim();
-  }
-
-  const query = rawMatch;
+  const query = ctx.match ? ctx.match.trim() : '';
 
   if (!query) {
     return ctx.reply("⚠️ Usage: `/lookfor <User ID | @username | Department>`", { 
@@ -448,7 +453,6 @@ bot.command('lookfor', async (ctx) => {
     });
   }
 
-  // Clean '@' symbol if searching by username
   const cleanQuery = query.replace(/^@/, '');
 
   const res = await pool.query(
@@ -772,7 +776,7 @@ bot.callbackQuery(/^trans_(\d+)$/, async (ctx) => {
   });
 });
 
-// Daily Summary Scheduler (Runs every day at 8:00 AM)
+// Daily Summary Scheduler
 cron.schedule('0 8 * * *', async () => {
   try {
     const appSummary = await generateSummaryText('APPROVED');
@@ -789,7 +793,6 @@ cron.schedule('0 8 * * *', async () => {
   }
 });
 
-// Express Webhook Handling
 app.use('/webhook', webhookCallback(bot, 'express'));
 
 app.get('/', (req, res) => {
@@ -799,9 +802,8 @@ app.get('/', (req, res) => {
 async function main() {
   await initDB();
 
-  // Register scope-specific bot commands in Telegram UI
   try {
-    // Private chats (Students)
+    // Register private chat commands (for students)
     await bot.api.setMyCommands(
       [
         { command: 'start', description: 'Start payment receipt submission' },
@@ -811,7 +813,7 @@ async function main() {
       { scope: { type: 'all_private_chats' } }
     );
 
-    // Group chats (Staff Group)
+    // Register group chat commands (for staff group)
     await bot.api.setMyCommands(
       [
         { command: 'lookfor', description: 'Search records by ID, username, or dept' },
