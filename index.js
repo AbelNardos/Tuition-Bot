@@ -241,14 +241,14 @@ function getStudentKeyboard(lang = 'en', status = null) {
   return kb;
 }
 
-function getTransferKeyboard(userId) {
+function getTransferKeyboard(userId, topicId) {
   return new InlineKeyboard()
-    .text("📈 Marketing Mgmt", `tr_${userId}_mkt`)
-    .text("💼 Business Mgmt", `tr_${userId}_biz`).row()
-    .text("🌾 Agribusiness & VCM", `tr_${userId}_agri`)
-    .text("📚 Ed. Planning", `tr_${userId}_ed`).row()
-    .text("📊 Accounting & Finance", `tr_${userId}_acc`)
-    .text("🚚 Logistics & SCM", `tr_${userId}_log`);
+    .text("📈 Marketing Mgmt", `tr_${userId}_${topicId}_mkt`)
+    .text("💼 Business Mgmt", `tr_${userId}_${topicId}_biz`).row()
+    .text("🌾 Agribusiness & VCM", `tr_${userId}_${topicId}_agri`)
+    .text("📚 Ed. Planning", `tr_${userId}_${topicId}_ed`).row()
+    .text("📊 Accounting & Finance", `tr_${userId}_${topicId}_acc`)
+    .text("🚚 Logistics & SCM", `tr_${userId}_${topicId}_log`);
 }
 
 function getRejectionReasonKeyboard(userId, topicId) {
@@ -693,7 +693,7 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
   );
 });
 
-bot.callbackQuery(/^tr_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
+bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   try {
     await ctx.answerCallbackQuery();
   } catch (e) {
@@ -701,7 +701,8 @@ bot.callbackQuery(/^tr_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   }
 
   const targetUserId = Number(ctx.match[1]);
-  const deptCode = ctx.match[2];
+  const originTopicId = Number(ctx.match[2]);
+  const deptCode = ctx.match[3];
 
   const deptMap = {
     mkt: "Marketing Management (Regular / Term)",
@@ -715,58 +716,64 @@ bot.callbackQuery(/^tr_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   const newDeptTagged = deptMap[deptCode];
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
-  const ticketRes = await pool.query('SELECT topic_id, message_id, ticket_msg_id, username FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1', [targetUserId]);
+  const ticketRes = await pool.query(
+    'SELECT topic_id, message_id, ticket_msg_id, username FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' ORDER BY updated_at DESC LIMIT 1',
+    [targetUserId, originTopicId]
+  );
 
-  if (ticketRes.rows.length > 0) {
-    const ticket = ticketRes.rows[0];
-    const username = ticket.username || 'Unknown';
-    if (ticket.ticket_msg_id) {
-      try {
-        await ctx.api.deleteMessage(STAFF_GROUP_ID, Number(ticket.ticket_msg_id));
-      } catch (e) {
-        console.error("Could not delete old ticket message:", e);
-      }
+  if (ticketRes.rows.length === 0) {
+    return ctx.editMessageText("⚠️ This submission is no longer pending or has already been transferred.", { parse_mode: 'Markdown' });
+  }
+
+  const ticket = ticketRes.rows[0];
+  const username = ticket.username || 'Unknown';
+
+  if (ticket.ticket_msg_id) {
+    try {
+      await ctx.api.deleteMessage(STAFF_GROUP_ID, Number(ticket.ticket_msg_id));
+    } catch (e) {
+      console.error("Could not delete old ticket message:", e);
     }
+  }
 
-    const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged);
+  const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged);
+
+  try {
+    await ctx.api.copyMessage(STAFF_GROUP_ID, STAFF_GROUP_ID, Number(ticket.message_id), {
+      message_thread_id: newTopicId
+    });
+
+    const actionKeyboard = new InlineKeyboard()
+      .text("✅ Approve", `app_${targetUserId}_${newTopicId}`).row()
+      .text("❌ Reject", `rej_${targetUserId}_${newTopicId}`).row()
+      .text("🔄 Transfer Dept", `trans_${targetUserId}_${newTopicId}`);
+
+    const newTicketMsg = await ctx.api.sendMessage(
+      STAFF_GROUP_ID,
+      `📥 New Submission\n• Student ID: ${targetUserId}\n• Username: @${username}\n• Department: ${newDeptTagged}`,
+      { message_thread_id: newTopicId, reply_markup: actionKeyboard }
+    );
+
+    await pool.query(`
+      UPDATE tickets 
+      SET department = $1, topic_id = $2, ticket_msg_id = $3, updated_at = CURRENT_TIMESTAMP 
+      WHERE user_id = $4 AND status = 'PENDING'
+    `, [newDeptTagged, newTopicId, newTicketMsg.message_id, targetUserId]);
 
     try {
-      await ctx.api.copyMessage(STAFF_GROUP_ID, STAFF_GROUP_ID, Number(ticket.message_id), {
-        message_thread_id: newTopicId
-      });
-
-      const actionKeyboard = new InlineKeyboard()
-        .text("✅ Approve", `app_${targetUserId}_${newTopicId}`).row()
-        .text("❌ Reject", `rej_${targetUserId}_${newTopicId}`).row()
-        .text("🔄 Transfer Dept", `trans_${targetUserId}`);
-
-      const newTicketMsg = await ctx.api.sendMessage(
-        STAFF_GROUP_ID,
-        `📥 New Submission\n• Student ID: ${targetUserId}\n• Username: @${username}\n• Department: ${newDeptTagged}`,
-        { message_thread_id: newTopicId, reply_markup: actionKeyboard }
+      const studentLang = await getUserLang(targetUserId);
+      const t = STRINGS[studentLang];
+      await ctx.api.sendMessage(
+        targetUserId,
+        t.deptUpdated.replace('{dept}', newDeptTagged),
+        { parse_mode: 'Markdown' }
       );
-
-      await pool.query(`
-        UPDATE tickets 
-        SET department = $1, topic_id = $2, ticket_msg_id = $3, updated_at = CURRENT_TIMESTAMP 
-        WHERE user_id = $4
-      `, [newDeptTagged, newTopicId, newTicketMsg.message_id, targetUserId]);
-
-      try {
-        const studentLang = await getUserLang(targetUserId);
-        const t = STRINGS[studentLang];
-        await ctx.api.sendMessage(
-          targetUserId,
-          t.deptUpdated.replace('{dept}', newDeptTagged),
-          { parse_mode: 'Markdown' }
-        );
-      } catch (studentErr) {
-        console.error("Could not send transfer notification to student:", studentErr);
-      }
-
-    } catch (e) {
-      console.error("Error moving message during transfer:", e);
+    } catch (studentErr) {
+      console.error("Could not send transfer notification to student:", studentErr);
     }
+
+  } catch (e) {
+    console.error("Error moving message during transfer:", e);
   }
 
   await ctx.editMessageText(
@@ -846,7 +853,7 @@ bot.on('message', async (ctx) => {
       const actionKeyboard = new InlineKeyboard()
         .text("✅ Approve", `app_${userId}_${topicId}`).row()
         .text("❌ Reject", `rej_${userId}_${topicId}`).row()
-        .text("🔄 Transfer Dept", `trans_${userId}`);
+        .text("🔄 Transfer Dept", `trans_${userId}_${topicId}`);
 
       const sentTicketMsg = await ctx.api.sendMessage(
         STAFF_GROUP_ID,
@@ -972,11 +979,14 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   }
 });
 
-bot.callbackQuery(/^trans_(\d+)$/, async (ctx) => {
+bot.callbackQuery(/^trans_(\d+)_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = Number(ctx.match[1]);
+  const topicId = Number(ctx.match[2]);
+
   await ctx.reply("📂 Select new department for transfer:", {
-    reply_markup: getTransferKeyboard(userId)
+    message_thread_id: topicId,
+    reply_markup: getTransferKeyboard(userId, topicId)
   });
 });
 
