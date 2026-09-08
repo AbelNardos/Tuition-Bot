@@ -476,10 +476,12 @@ bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   const t = STRINGS[lang];
   const currentStatus = await getUserStatus(userId);
 
-  await ctx.editMessageText(
-    t.portalWelcome,
-    { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, currentStatus) }
-  );
+  try {
+    await ctx.editMessageText(
+      t.portalWelcome,
+      { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, currentStatus) }
+    );
+  } catch (e) {}
 });
 
 bot.callbackQuery('cmd_lookfor', async (ctx) => {
@@ -554,10 +556,12 @@ bot.callbackQuery(/^paytype_(reg|full)$/, async (ctx) => {
   const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
-  await ctx.editMessageText(
-    t.selectDept,
-    { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard(planType) }
-  );
+  try {
+    await ctx.editMessageText(
+      t.selectDept,
+      { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard(planType) }
+    );
+  } catch (e) {}
 });
 
 bot.callbackQuery('cmd_status', async (ctx) => {
@@ -688,10 +692,12 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
 
   pendingDepartments.set(userId, fullTaggedDept);
 
-  await ctx.editMessageText(
-    t.sendReceiptPrompt.replace('{dept}', fullTaggedDept),
-    { parse_mode: 'Markdown' }
-  );
+  try {
+    await ctx.editMessageText(
+      t.sendReceiptPrompt.replace('{dept}', fullTaggedDept),
+      { parse_mode: 'Markdown' }
+    );
+  } catch (e) {}
 });
 
 bot.callbackQuery(/^trans_(\d+)_(\d+)$/, async (ctx) => {
@@ -699,10 +705,12 @@ bot.callbackQuery(/^trans_(\d+)_(\d+)$/, async (ctx) => {
   const userId = Number(ctx.match[1]);
   const topicId = Number(ctx.match[2]);
 
-  await ctx.editMessageText("📂 **Select new department for transfer:**", {
-    parse_mode: 'Markdown',
-    reply_markup: getTransferKeyboard(userId, topicId)
-  });
+  try {
+    await ctx.editMessageText("📂 **Select new department for transfer:**", {
+      parse_mode: 'Markdown',
+      reply_markup: getTransferKeyboard(userId, topicId)
+    });
+  } catch (e) {}
 });
 
 bot.callbackQuery(/^canceltrans_(\d+)_(\d+)$/, async (ctx) => {
@@ -716,7 +724,11 @@ bot.callbackQuery(/^canceltrans_(\d+)_(\d+)$/, async (ctx) => {
   );
 
   if (ticketRes.rows.length === 0) {
-    return ctx.editMessageText("⚠️ Ticket status changed or non-existent.");
+    try {
+      return ctx.editMessageText("⚠️ Ticket status changed or non-existent.");
+    } catch (e) {
+      return;
+    }
   }
 
   const { username, department } = ticketRes.rows[0];
@@ -726,18 +738,18 @@ bot.callbackQuery(/^canceltrans_(\d+)_(\d+)$/, async (ctx) => {
     .text("❌ Reject", `rej_${userId}_${topicId}`).row()
     .text("🔄 Transfer Dept", `trans_${userId}_${topicId}`);
 
-  await ctx.editMessageText(
-    `📥 New Submission\n• Student ID: ${userId}\n• Username: @${username || 'Unknown'}\n• Department: ${department}`,
-    { reply_markup: actionKeyboard }
-  );
+  try {
+    await ctx.editMessageText(
+      `📥 New Submission\n• Student ID: ${userId}\n• Username: @${username || 'Unknown'}\n• Department: ${department}`,
+      { reply_markup: actionKeyboard }
+    );
+  } catch (e) {}
 });
 
 bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   try {
     await ctx.answerCallbackQuery();
-  } catch (e) {
-    console.log("Callback query expired before answer:", e.message);
-  }
+  } catch (e) {}
 
   const targetUserId = Number(ctx.match[1]);
   const originTopicId = Number(ctx.match[2]);
@@ -761,19 +773,15 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   );
 
   if (ticketRes.rows.length === 0) {
-    return ctx.editMessageText("⚠️ This submission is no longer pending or has already been transferred.", { parse_mode: 'Markdown' });
+    try {
+      return ctx.editMessageText("⚠️ This submission is no longer pending or has already been transferred.", { parse_mode: 'Markdown' });
+    } catch (e) {
+      return;
+    }
   }
 
   const ticket = ticketRes.rows[0];
   const username = ticket.username || 'Unknown';
-
-  if (ticket.ticket_msg_id) {
-    try {
-      await ctx.api.deleteMessage(STAFF_GROUP_ID, Number(ticket.ticket_msg_id));
-    } catch (e) {
-      console.error("Could not delete old ticket message:", e);
-    }
-  }
 
   const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged);
 
@@ -815,10 +823,13 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
     console.error("Error moving message during transfer:", e);
   }
 
-  await ctx.editMessageText(
-    `🔄 Student receipt (ID: \`${targetUserId}\`) successfully transferred to **${newDeptTagged}** by **${staffName}**.`,
-    { parse_mode: 'Markdown' }
-  );
+  if (ticket.ticket_msg_id) {
+    try {
+      await ctx.api.deleteMessage(STAFF_GROUP_ID, Number(ticket.ticket_msg_id));
+    } catch (e) {
+      console.error("Could not delete old ticket message:", e);
+    }
+  }
 });
 
 bot.on('message', async (ctx) => {
@@ -953,10 +964,12 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
     await ctx.api.sendMessage(userId, t.approvedMsg, { parse_mode: 'Markdown' });
   }
 
-  await ctx.editMessageText(
-    `✅ Approved Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${deptTag}\n• Approved by: ${staffName}`,
-    { parse_mode: 'Markdown' }
-  );
+  try {
+    await ctx.editMessageText(
+      `✅ Approved Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${deptTag}\n• Approved by: ${staffName}`,
+      { parse_mode: 'Markdown' }
+    );
+  } catch (e) {}
 
   if (APPROVED_THREAD_ID) {
     const sortedReport = await generateSummaryText('APPROVED');
@@ -969,10 +982,12 @@ bot.callbackQuery(/^rej_(\d+)_(\d+)$/, async (ctx) => {
   const userId = Number(ctx.match[1]);
   const topicId = Number(ctx.match[2]);
 
-  await ctx.editMessageText("❌ **Select rejection reason:**", {
-    parse_mode: 'Markdown',
-    reply_markup: getRejectionReasonKeyboard(userId, topicId)
-  });
+  try {
+    await ctx.editMessageText("❌ **Select rejection reason:**", {
+      parse_mode: 'Markdown',
+      reply_markup: getRejectionReasonKeyboard(userId, topicId)
+    });
+  } catch (e) {}
 });
 
 bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
@@ -1008,7 +1023,9 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
     { parse_mode: 'Markdown', reply_markup: resubmitKeyboard }
   );
 
-  await ctx.editMessageText(`❌ Receipt rejected by **${staffName}**.\n**Reason:** ${reasonText}`, { parse_mode: 'Markdown' });
+  try {
+    await ctx.editMessageText(`❌ Receipt rejected by **${staffName}**.\n**Reason:** ${reasonText}`, { parse_mode: 'Markdown' });
+  } catch (e) {}
 
   if (REJECTED_THREAD_ID) {
     await ctx.api.sendMessage(
