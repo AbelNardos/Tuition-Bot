@@ -96,21 +96,6 @@ async function setUserLang(userId, lang) {
   }
 }
 
-async function getUserStatus(userId) {
-  try {
-    const res = await pool.query(
-      'SELECT status FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1',
-      [userId]
-    );
-    if (res.rows.length > 0) {
-      return res.rows[0].status;
-    }
-  } catch (err) {
-    console.error("Error fetching user status:", err);
-  }
-  return null;
-}
-
 bot.use(async (ctx, next) => {
   if (ctx.message && ctx.message.text && ctx.match) {
     const botUsername = ctx.me?.username;
@@ -479,12 +464,11 @@ bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   await setUserLang(userId, lang);
 
   const t = STRINGS[lang];
-  const currentStatus = await getUserStatus(userId);
 
   try {
     await ctx.editMessageText(
       t.portalWelcome,
-      { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, currentStatus) }
+      { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) }
     );
   } catch (e) {}
 });
@@ -656,7 +640,6 @@ bot.callbackQuery('cmd_history', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
-  const currentStatus = await getUserStatus(userId);
 
   const res = await pool.query(
     'SELECT department, status, rejection_reason, created_at FROM tickets WHERE user_id = $1 ORDER BY created_at DESC',
@@ -667,7 +650,7 @@ bot.callbackQuery('cmd_history', async (ctx) => {
     const noHistory = lang === 'am'
       ? "ℹ️ ምንም የተመዘገበ የክፍያ ታሪክ የለም።"
       : "ℹ️ No payment submission history found.";
-    return ctx.reply(noHistory, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, currentStatus) });
+    return ctx.reply(noHistory, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
   }
 
   let text = lang === 'am'
@@ -689,16 +672,15 @@ bot.callbackQuery('cmd_history', async (ctx) => {
     text += `\n`;
   });
 
-  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, currentStatus) });
+  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
 });
 
 bot.callbackQuery('cmd_help', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
-  const currentStatus = await getUserStatus(userId);
   const t = STRINGS[lang];
-  await ctx.reply(t.helpText, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, currentStatus) });
+  await ctx.reply(t.helpText, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
 });
 
 bot.callbackQuery('start_resubmit', async (ctx) => {
@@ -822,12 +804,10 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged);
 
   try {
-    // 1. Copy original receipt to new department topic
     const newForwardRes = await ctx.api.copyMessage(STAFF_GROUP_ID, STAFF_GROUP_ID, Number(ticket.message_id), {
       message_thread_id: newTopicId
     });
 
-    // 2. Send control buttons to new department topic
     const actionKeyboard = new InlineKeyboard()
       .text("✅ Approve", `app_${targetUserId}_${newTopicId}`).row()
       .text("❌ Reject", `rej_${targetUserId}_${newTopicId}`).row()
@@ -839,14 +819,12 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
       { message_thread_id: newTopicId, reply_markup: actionKeyboard }
     );
 
-    // 3. Update database record with new message pointers
     await pool.query(`
       UPDATE tickets 
       SET department = $1, topic_id = $2, message_id = $3, ticket_msg_id = $4, updated_at = CURRENT_TIMESTAMP 
       WHERE user_id = $5 AND status = 'PENDING'
     `, [newDeptTagged, newTopicId, newForwardRes.message_id, newTicketMsg.message_id, targetUserId]);
 
-    // 4. Clean up BOTH media receipt and action panel from OLD topic
     if (ticket.message_id) {
       try {
         await ctx.api.deleteMessage(STAFF_GROUP_ID, Number(ticket.message_id));
@@ -863,7 +841,6 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
       }
     }
 
-    // 5. Notify student
     try {
       const studentLang = await getUserLang(targetUserId);
       const t = STRINGS[studentLang];
