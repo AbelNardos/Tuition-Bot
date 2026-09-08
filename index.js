@@ -59,24 +59,40 @@ async function initDB() {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS user_id BIGINT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS username TEXT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS receipt_file_id TEXT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS topic_id BIGINT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS message_id BIGINT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS ticket_msg_id BIGINT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS department TEXT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'PENDING';
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS processed_by TEXT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-
     CREATE TABLE IF NOT EXISTS department_topics (
       department TEXT PRIMARY KEY,
       topic_id BIGINT
     );
+
+    CREATE TABLE IF NOT EXISTS user_settings (
+      user_id BIGINT PRIMARY KEY,
+      language TEXT DEFAULT 'en'
+    );
   `);
+}
+
+async function getUserLang(userId) {
+  try {
+    const res = await pool.query('SELECT language FROM user_settings WHERE user_id = $1', [userId]);
+    if (res.rows.length > 0) {
+      return res.rows[0].language;
+    }
+  } catch (err) {
+    console.error("Error fetching user language:", err);
+  }
+  return 'en';
+}
+
+async function setUserLang(userId, lang) {
+  try {
+    await pool.query(`
+      INSERT INTO user_settings (user_id, language) 
+      VALUES ($1, $2) 
+      ON CONFLICT (user_id) DO UPDATE SET language = EXCLUDED.language
+    `, [userId, lang]);
+  } catch (err) {
+    console.error("Error setting user language:", err);
+  }
 }
 
 bot.use(async (ctx, next) => {
@@ -93,7 +109,6 @@ bot.use(async (ctx, next) => {
 });
 
 const pendingDepartments = new Map();
-const userLanguages = new Map();
 
 const DEPARTMENTS = [
   "Marketing Management",
@@ -133,7 +148,7 @@ const STRINGS = {
     rejectedMsg: "❌ **ደረሰኝዎ ውድቅ ተደርጓል**\n\n**ምክንያት:** {reason}\n\n{message}",
     reuploadBtn: "🔄 ደረሰኝ እንደገና ስቀል",
     noFileErr: "⚠️ እባክዎን ትክክለኛ የክፍያ ደረሰኝ **ፎቶ ወይም ስክሪንሾት** ይላኩ። በጽሁፍ ብቻ የሚላክ መረጃ አይቀበልም።",
-    deptUpdated: "🔄 **ትምህርት ክፍል ተቀይሯል**\nየደረሰኝ ማመልከቻዎ ወደ **{dept}** ተዛውሯል። መረጃዎ በዚህ ትምህርት ክፍል ስር የሚታይ ይሆናል።",
+    deptUpdated: "🔄 **ትምህርት ክፍል ተቀይሯል**\nየደረሰኝ ማመልከቻዎ ወደ **{dept}** ተዛውሯል። መረጃዎ በዚህ ትምህርት ክፍል ስር የሚታይ ይሆናል አሁን።",
     pendingExists: "⚠️ **አሁንም በሂደት ላይ ያለ ማመልከቻ አለ**\n\nቀደም ሲል የላኩት ደረሰኝ በመገምገም ላይ ይገኛል። እባክዎን የቡድኑን ምላሽ ይጠብቁ።",
     helpText: "❓ **እርዳታ ይፈልጋሉ?**\n\nበትምህርት ክፍያ ወይም በትምህርት ክፍል ምዝገባ ላይ ጥያቄ ወይም ችግር ካለዎት፣ እባክዎን የሬጅስትራር ቢሮውን በቀጥታ ያነጋግሩ ወይም የክፍያ ደረሰኝ ፎቶዎን ይላኩ።"
   }
@@ -438,7 +453,8 @@ bot.command(['start', 'panel'], async (ctx) => {
 
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   const lang = ctx.match[1];
-  userLanguages.set(ctx.from.id, lang);
+  const userId = ctx.from.id;
+  await setUserLang(userId, lang);
   await ctx.answerCallbackQuery();
 
   const t = STRINGS[lang];
@@ -490,7 +506,7 @@ bot.callbackQuery('cmd_broadcast', async (ctx) => {
 bot.callbackQuery('cmd_submit', async (ctx) => {
   await ctx.answerCallbackQuery();
   const userId = ctx.from.id;
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
   await ctx.reply(
@@ -502,7 +518,7 @@ bot.callbackQuery('cmd_submit', async (ctx) => {
 bot.callbackQuery(/^paytype_(reg|full)$/, async (ctx) => {
   const planType = ctx.match[1];
   const userId = ctx.from.id;
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
   await ctx.answerCallbackQuery();
@@ -515,7 +531,7 @@ bot.callbackQuery(/^paytype_(reg|full)$/, async (ctx) => {
 bot.callbackQuery('cmd_status', async (ctx) => {
   await ctx.answerCallbackQuery();
   const userId = ctx.from.id;
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
 
   const res = await pool.query(
     'SELECT department, status, rejection_reason, updated_at FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1',
@@ -561,7 +577,7 @@ bot.callbackQuery('cmd_status', async (ctx) => {
 bot.callbackQuery('cmd_history', async (ctx) => {
   await ctx.answerCallbackQuery();
   const userId = ctx.from.id;
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
 
   const res = await pool.query(
     'SELECT department, status, rejection_reason, created_at FROM tickets WHERE user_id = $1 ORDER BY created_at DESC',
@@ -599,7 +615,7 @@ bot.callbackQuery('cmd_history', async (ctx) => {
 
 bot.callbackQuery('cmd_help', async (ctx) => {
   await ctx.answerCallbackQuery();
-  const lang = userLanguages.get(ctx.from.id) || 'en';
+  const lang = await getUserLang(ctx.from.id);
   const t = STRINGS[lang];
   await ctx.reply(t.helpText, { parse_mode: 'Markdown' });
 });
@@ -607,7 +623,7 @@ bot.callbackQuery('cmd_help', async (ctx) => {
 bot.callbackQuery('start_resubmit', async (ctx) => {
   await ctx.answerCallbackQuery();
   const userId = ctx.from.id;
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
   pendingDepartments.delete(userId);
@@ -622,7 +638,7 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
   const isFull = ctx.match[1] === 'full';
   const baseDept = ctx.match[2];
   const userId = ctx.from.id;
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
   const fullTaggedDept = isFull 
@@ -683,7 +699,7 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
       `, [newDeptTagged, newTopicId, newTicketMsg.message_id, targetUserId]);
 
       try {
-        const studentLang = userLanguages.get(targetUserId) || 'en';
+        const studentLang = await getUserLang(targetUserId);
         const t = STRINGS[studentLang];
         await ctx.api.sendMessage(
           targetUserId,
@@ -730,7 +746,7 @@ bot.on('message', async (ctx) => {
 
   if (isPrivate) {
     const userId = ctx.from.id;
-    const lang = userLanguages.get(userId) || 'en';
+    const lang = await getUserLang(userId);
     const t = STRINGS[lang];
 
     const activeCheck = await pool.query(
@@ -806,7 +822,7 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
 
   const deptTag = updateRes.rows[0].department;
   const username = updateRes.rows[0].username || 'N/A';
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
   try {
@@ -816,7 +832,6 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
       new InputFile(pdfPath, `Tuition_Approval_Slip_${userId}.pdf`),
       { caption: t.approvedMsg, parse_mode: 'Markdown' }
     );
-    // Clean up temporary file
     if (fs.existsSync(pdfPath)) {
       fs.unlinkSync(pdfPath);
     }
@@ -852,7 +867,7 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   const reasonCode = ctx.match[3];
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
   const reasonObj = REJECTION_REASONS.find(r => r.code === reasonCode);
