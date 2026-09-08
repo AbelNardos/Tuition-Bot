@@ -467,10 +467,10 @@ bot.command(['start', 'panel'], async (ctx) => {
 });
 
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const lang = ctx.match[1];
   const userId = ctx.from.id;
   await setUserLang(userId, lang);
-  await ctx.answerCallbackQuery();
 
   const t = STRINGS[lang];
   const currentStatus = await getUserStatus(userId);
@@ -482,7 +482,7 @@ bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
 });
 
 bot.callbackQuery('cmd_lookfor', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   await ctx.reply(
     "🔍 **Search Student Record**\n\nReply directly to this message with a **User ID**, **@username**, or **Department**.",
     {
@@ -494,7 +494,7 @@ bot.callbackQuery('cmd_lookfor', async (ctx) => {
 });
 
 bot.callbackQuery('cmd_stats', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const topicId = ctx.callbackQuery.message.message_thread_id;
   const appSummary = await generateSummaryText('APPROVED');
   const rejSummary = await generateSummaryText('REJECTED');
@@ -502,13 +502,13 @@ bot.callbackQuery('cmd_stats', async (ctx) => {
 });
 
 bot.callbackQuery('cmd_export', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const topicId = ctx.callbackQuery.message.message_thread_id;
   await sendCSVExport(topicId, "📄 **Receipt Audit Export**");
 });
 
 bot.callbackQuery('cmd_broadcast', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   await ctx.reply(
     "📢 **Send Student Announcement**\n\nReply directly to this message with the exact announcement text you want to send to all registered students.",
     {
@@ -520,7 +520,7 @@ bot.callbackQuery('cmd_broadcast', async (ctx) => {
 });
 
 bot.callbackQuery('cmd_submit', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
   const t = STRINGS[lang];
@@ -532,7 +532,7 @@ bot.callbackQuery('cmd_submit', async (ctx) => {
 });
 
 bot.callbackQuery('cmd_pending_info', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
   
@@ -547,12 +547,12 @@ bot.callbackQuery('cmd_pending_info', async (ctx) => {
 });
 
 bot.callbackQuery(/^paytype_(reg|full)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const planType = ctx.match[1];
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
-  await ctx.answerCallbackQuery();
   await ctx.editMessageText(
     t.selectDept,
     { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard(planType) }
@@ -560,7 +560,7 @@ bot.callbackQuery(/^paytype_(reg|full)$/, async (ctx) => {
 });
 
 bot.callbackQuery('cmd_status', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
 
@@ -611,7 +611,7 @@ bot.callbackQuery('cmd_status', async (ctx) => {
 });
 
 bot.callbackQuery('cmd_history', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
   const currentStatus = await getUserStatus(userId);
@@ -651,7 +651,7 @@ bot.callbackQuery('cmd_history', async (ctx) => {
 });
 
 bot.callbackQuery('cmd_help', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
   const currentStatus = await getUserStatus(userId);
@@ -660,7 +660,7 @@ bot.callbackQuery('cmd_help', async (ctx) => {
 });
 
 bot.callbackQuery('start_resubmit', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
   const t = STRINGS[lang];
@@ -674,6 +674,7 @@ bot.callbackQuery('start_resubmit', async (ctx) => {
 });
 
 bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const isFull = ctx.match[1] === 'full';
   const baseDept = ctx.match[2];
   const userId = ctx.from.id;
@@ -686,7 +687,6 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
 
   pendingDepartments.set(userId, fullTaggedDept);
 
-  await ctx.answerCallbackQuery();
   await ctx.editMessageText(
     t.sendReceiptPrompt.replace('{dept}', fullTaggedDept),
     { parse_mode: 'Markdown' }
@@ -694,11 +694,15 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
 });
 
 bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
+  try {
+    await ctx.answerCallbackQuery();
+  } catch (e) {
+    console.log("Callback query expired before answer:", e.message);
+  }
+
   const targetUserId = Number(ctx.match[1]);
   const newDeptTagged = ctx.match[2];
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
-
-  await ctx.answerCallbackQuery();
 
   const ticketRes = await pool.query('SELECT topic_id, message_id, ticket_msg_id, username FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1', [targetUserId]);
 
@@ -847,11 +851,10 @@ bot.on('message', async (ctx) => {
 });
 
 bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = Number(ctx.match[1]);
   const topicId = Number(ctx.match[2]);
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
-
-  await ctx.answerCallbackQuery();
   
   const updateRes = await pool.query(
     "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING department, username",
@@ -894,16 +897,17 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
 });
 
 bot.callbackQuery(/^rej_(\d+)_(\d+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = Number(ctx.match[1]);
   const topicId = Number(ctx.match[2]);
 
-  await ctx.answerCallbackQuery();
   await ctx.reply("Select rejection reason:", {
     reply_markup: getRejectionReasonKeyboard(userId, topicId)
   });
 });
 
 bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = Number(ctx.match[1]);
   const topicId = Number(ctx.match[2]);
   const reasonCode = ctx.match[3];
@@ -915,8 +919,6 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   const reasonObj = REJECTION_REASONS.find(r => r.code === reasonCode);
   const reasonText = reasonObj ? reasonObj.label : "Receipt details unverified";
   const customMessage = reasonObj ? (lang === 'am' ? reasonObj.message_am : reasonObj.message_en) : "Please re-upload a valid payment receipt.";
-
-  await ctx.answerCallbackQuery();
 
   const updateRes = await pool.query(
     `UPDATE tickets 
@@ -949,8 +951,8 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
 });
 
 bot.callbackQuery(/^trans_(\d+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = Number(ctx.match[1]);
-  await ctx.answerCallbackQuery();
   await ctx.reply("📂 Select new department for transfer:", {
     reply_markup: getTransferKeyboard(userId)
   });
