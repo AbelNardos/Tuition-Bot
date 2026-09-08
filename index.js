@@ -83,6 +83,20 @@ async function initDB() {
       ALTER TABLE tickets ADD COLUMN IF NOT EXISTS panel_msg_id BIGINT;
       ALTER TABLE department_topics ADD COLUMN IF NOT EXISTS group_id TEXT DEFAULT '';
     `);
+
+    // Ensure composite unique constraint exists for ON CONFLICT matching
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'department_topics_group_id_department_key'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'department_topics_pkey'
+        ) THEN
+          ALTER TABLE department_topics ADD CONSTRAINT department_topics_group_id_department_key UNIQUE (group_id, department);
+        END IF;
+      END $$;
+    `);
   } catch (err) {
     console.error("Migration check error:", err);
   }
