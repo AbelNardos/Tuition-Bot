@@ -65,13 +65,6 @@ async function initDB() {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
-    CREATE TABLE IF NOT EXISTS department_topics (
-      group_id TEXT DEFAULT '',
-      department TEXT,
-      topic_id BIGINT,
-      PRIMARY KEY (group_id, department)
-    );
-
     CREATE TABLE IF NOT EXISTS user_settings (
       user_id BIGINT PRIMARY KEY,
       language TEXT DEFAULT 'en'
@@ -81,20 +74,30 @@ async function initDB() {
   try {
     await pool.query(`
       ALTER TABLE tickets ADD COLUMN IF NOT EXISTS panel_msg_id BIGINT;
-      ALTER TABLE department_topics ADD COLUMN IF NOT EXISTS group_id TEXT DEFAULT '';
     `);
 
-    // Ensure composite unique constraint exists for ON CONFLICT matching
+    // Ensure department_topics exists with correct structure
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS department_topics (
+        group_id TEXT NOT NULL DEFAULT '',
+        department TEXT NOT NULL,
+        topic_id BIGINT,
+        PRIMARY KEY (group_id, department)
+      );
+    `);
+
+    // Migrate existing table constraints if it was created under old schemas
     await pool.query(`
       DO $$
       BEGIN
         IF NOT EXISTS (
-          SELECT 1 FROM pg_constraint WHERE conname = 'department_topics_group_id_department_key'
-        ) AND NOT EXISTS (
           SELECT 1 FROM pg_constraint WHERE conname = 'department_topics_pkey'
         ) THEN
-          ALTER TABLE department_topics ADD CONSTRAINT department_topics_group_id_department_key UNIQUE (group_id, department);
+          ALTER TABLE department_topics DROP CONSTRAINT IF EXISTS department_topics_department_key;
+          ALTER TABLE department_topics ADD PRIMARY KEY (group_id, department);
         END IF;
+      EXCEPTION WHEN OTHERS THEN
+        NULL;
       END $$;
     `);
   } catch (err) {
@@ -327,8 +330,9 @@ bot.catch((err) => console.error('Error in bot framework:', err));
 async function getOrCreateDepartmentTopic(ctx, departmentName, targetGroupId) {
   const baseDepartment = departmentName.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
 
+  // Step 1: Check if topic already exists for this group and department
   const cached = await pool.query(
-    'SELECT topic_id FROM department_topics WHERE group_id = $1 AND department = $2',
+    'SELECT topic_id FROM department_topics WHERE group_id = $1 AND department = $2 LIMIT 1',
     [targetGroupId, baseDepartment]
   );
 
@@ -336,14 +340,20 @@ async function getOrCreateDepartmentTopic(ctx, departmentName, targetGroupId) {
     return Number(cached.rows[0].topic_id);
   }
 
+  // Step 2: Create new Telegram Forum Topic
   const newTopic = await ctx.api.createForumTopic(targetGroupId, `📁 [${baseDepartment}]`);
   const topicId = newTopic.message_thread_id;
 
-  await pool.query(`
-    INSERT INTO department_topics (group_id, department, topic_id) 
-    VALUES ($1, $2, $3) 
-    ON CONFLICT (group_id, department) DO UPDATE SET topic_id = EXCLUDED.topic_id
-  `, [targetGroupId, baseDepartment, topicId]);
+  // Step 3: Insert or update safely without strict unique constraint dependency
+  await pool.query(
+    `DELETE FROM department_topics WHERE group_id = $1 AND department = $2`,
+    [targetGroupId, baseDepartment]
+  );
+
+  await pool.query(
+    `INSERT INTO department_topics (group_id, department, topic_id) VALUES ($1, $2, $3)`,
+    [targetGroupId, baseDepartment, topicId]
+  );
 
   return topicId;
 }
