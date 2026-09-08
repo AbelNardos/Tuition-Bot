@@ -650,7 +650,7 @@ bot.callbackQuery('cmd_history', async (ctx) => {
   const lang = await getUserLang(userId);
 
   const res = await pool.query(
-    'SELECT department, status, rejection_reason, created_at FROM tickets WHERE user_id = $1 ORDER BY created_at DESC',
+    'SELECT department, status, rejection_reason, created_at FROM tickets WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20',
     [userId]
   );
 
@@ -662,25 +662,34 @@ bot.callbackQuery('cmd_history', async (ctx) => {
   }
 
   let text = lang === 'am'
-    ? `📜 **የክፍያ ታሪክዎት (${res.rows.length}):**\n\n`
-    : `📜 **Your Payment History (${res.rows.length}):**\n\n`;
+    ? `📜 **የክፍያ ታሪክዎት (የመጨረሻዎቹ ${res.rows.length}):**\n\n`
+    : `📜 **Your Payment History (Latest ${res.rows.length}):**\n\n`;
 
-  res.rows.forEach((r, idx) => {
+  for (let idx = 0; idx < res.rows.length; idx++) {
+    const r = res.rows[idx];
     const dateStr = new Date(r.created_at).toLocaleDateString();
     let statusIcon = "⏳";
     if (r.status === 'APPROVED') statusIcon = "✅";
     if (r.status === 'REJECTED') statusIcon = "❌";
 
-    text += `${idx + 1}. ${statusIcon} **${r.department}**\n`;
-    text += `   • Status: ${r.status}\n`;
-    text += `   • Date: ${dateStr}\n`;
+    let itemText = `${idx + 1}. ${statusIcon} **${r.department}**\n`;
+    itemText += `   • Status: ${r.status}\n`;
+    itemText += `   • Date: ${dateStr}\n`;
     if (r.status === 'REJECTED' && r.rejection_reason) {
-      text += `   • Reason: ${r.rejection_reason}\n`;
+      itemText += `   • Reason: ${r.rejection_reason}\n`;
     }
-    text += `\n`;
-  });
+    itemText += `\n`;
 
-  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
+    if ((text + itemText).length > 3800) {
+      await ctx.reply(text, { parse_mode: 'Markdown' });
+      text = "";
+    }
+    text += itemText;
+  }
+
+  if (text.trim().length > 0) {
+    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
+  }
 });
 
 bot.callbackQuery('cmd_help', async (ctx) => {
