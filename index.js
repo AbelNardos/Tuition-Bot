@@ -248,7 +248,8 @@ function getTransferKeyboard(userId, topicId) {
     .text("🌾 Agribusiness & VCM", `tr_${userId}_${topicId}_agri`)
     .text("📚 Ed. Planning", `tr_${userId}_${topicId}_ed`).row()
     .text("📊 Accounting & Finance", `tr_${userId}_${topicId}_acc`)
-    .text("🚚 Logistics & SCM", `tr_${userId}_${topicId}_log`);
+    .text("🚚 Logistics & SCM", `tr_${userId}_${topicId}_log`).row()
+    .text("🔙 Cancel Transfer", `canceltrans_${userId}_${topicId}`);
 }
 
 function getRejectionReasonKeyboard(userId, topicId) {
@@ -693,6 +694,44 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
   );
 });
 
+bot.callbackQuery(/^trans_(\d+)_(\d+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const userId = Number(ctx.match[1]);
+  const topicId = Number(ctx.match[2]);
+
+  await ctx.editMessageText("📂 **Select new department for transfer:**", {
+    parse_mode: 'Markdown',
+    reply_markup: getTransferKeyboard(userId, topicId)
+  });
+});
+
+bot.callbackQuery(/^canceltrans_(\d+)_(\d+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const userId = Number(ctx.match[1]);
+  const topicId = Number(ctx.match[2]);
+
+  const ticketRes = await pool.query(
+    'SELECT username, department FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' LIMIT 1',
+    [userId, topicId]
+  );
+
+  if (ticketRes.rows.length === 0) {
+    return ctx.editMessageText("⚠️ Ticket status changed or non-existent.");
+  }
+
+  const { username, department } = ticketRes.rows[0];
+
+  const actionKeyboard = new InlineKeyboard()
+    .text("✅ Approve", `app_${userId}_${topicId}`).row()
+    .text("❌ Reject", `rej_${userId}_${topicId}`).row()
+    .text("🔄 Transfer Dept", `trans_${userId}_${topicId}`);
+
+  await ctx.editMessageText(
+    `📥 New Submission\n• Student ID: ${userId}\n• Username: @${username || 'Unknown'}\n• Department: ${department}`,
+    { reply_markup: actionKeyboard }
+  );
+});
+
 bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   try {
     await ctx.answerCallbackQuery();
@@ -930,7 +969,8 @@ bot.callbackQuery(/^rej_(\d+)_(\d+)$/, async (ctx) => {
   const userId = Number(ctx.match[1]);
   const topicId = Number(ctx.match[2]);
 
-  await ctx.reply("Select rejection reason:", {
+  await ctx.editMessageText("❌ **Select rejection reason:**", {
+    parse_mode: 'Markdown',
     reply_markup: getRejectionReasonKeyboard(userId, topicId)
   });
 });
@@ -977,17 +1017,6 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
       { message_thread_id: REJECTED_THREAD_ID, parse_mode: 'Markdown' }
     );
   }
-});
-
-bot.callbackQuery(/^trans_(\d+)_(\d+)$/, async (ctx) => {
-  try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const userId = Number(ctx.match[1]);
-  const topicId = Number(ctx.match[2]);
-
-  await ctx.reply("📂 Select new department for transfer:", {
-    message_thread_id: topicId,
-    reply_markup: getTransferKeyboard(userId, topicId)
-  });
 });
 
 cron.schedule('0 8 * * *', async () => {
