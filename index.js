@@ -765,7 +765,6 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   };
 
   const newDeptTagged = deptMap[deptCode];
-  const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
   const ticketRes = await pool.query(
     'SELECT topic_id, message_id, ticket_msg_id, username FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' ORDER BY updated_at DESC LIMIT 1',
@@ -786,10 +785,12 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged);
 
   try {
-    await ctx.api.copyMessage(STAFF_GROUP_ID, STAFF_GROUP_ID, Number(ticket.message_id), {
+    // 1. Copy original receipt to new department topic
+    const newForwardRes = await ctx.api.copyMessage(STAFF_GROUP_ID, STAFF_GROUP_ID, Number(ticket.message_id), {
       message_thread_id: newTopicId
     });
 
+    // 2. Send control buttons to new department topic
     const actionKeyboard = new InlineKeyboard()
       .text("✅ Approve", `app_${targetUserId}_${newTopicId}`).row()
       .text("❌ Reject", `rej_${targetUserId}_${newTopicId}`).row()
@@ -801,12 +802,31 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
       { message_thread_id: newTopicId, reply_markup: actionKeyboard }
     );
 
+    // 3. Update database record with new message pointers
     await pool.query(`
       UPDATE tickets 
-      SET department = $1, topic_id = $2, ticket_msg_id = $3, updated_at = CURRENT_TIMESTAMP 
-      WHERE user_id = $4 AND status = 'PENDING'
-    `, [newDeptTagged, newTopicId, newTicketMsg.message_id, targetUserId]);
+      SET department = $1, topic_id = $2, message_id = $3, ticket_msg_id = $4, updated_at = CURRENT_TIMESTAMP 
+      WHERE user_id = $5 AND status = 'PENDING'
+    `, [newDeptTagged, newTopicId, newForwardRes.message_id, newTicketMsg.message_id, targetUserId]);
 
+    // 4. Clean up BOTH media receipt and action panel from OLD topic
+    if (ticket.message_id) {
+      try {
+        await ctx.api.deleteMessage(STAFF_GROUP_ID, Number(ticket.message_id));
+      } catch (e) {
+        console.error("Could not delete old receipt media message:", e);
+      }
+    }
+
+    if (ticket.ticket_msg_id) {
+      try {
+        await ctx.api.deleteMessage(STAFF_GROUP_ID, Number(ticket.ticket_msg_id));
+      } catch (e) {
+        console.error("Could not delete old action panel message:", e);
+      }
+    }
+
+    // 5. Notify student
     try {
       const studentLang = await getUserLang(targetUserId);
       const t = STRINGS[studentLang];
@@ -820,15 +840,7 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
     }
 
   } catch (e) {
-    console.error("Error moving message during transfer:", e);
-  }
-
-  if (ticket.ticket_msg_id) {
-    try {
-      await ctx.api.deleteMessage(STAFF_GROUP_ID, Number(ticket.ticket_msg_id));
-    } catch (e) {
-      console.error("Could not delete old ticket message:", e);
-    }
+    console.error("Error transferring message:", e);
   }
 });
 
