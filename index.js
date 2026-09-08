@@ -517,7 +517,6 @@ bot.callbackQuery(/^paytype_(reg|full)$/, async (ctx) => {
   );
 });
 
-// FEATURE 2: Visual Real-Time Status Tracker Timeline
 bot.callbackQuery('cmd_status', async (ctx) => {
   await ctx.answerCallbackQuery();
   const userId = ctx.from.id;
@@ -532,7 +531,7 @@ bot.callbackQuery('cmd_status', async (ctx) => {
     const noSubMsg = lang === 'am' 
       ? "ℹ️ እስከ አሁን ምንም ደረሰኝ አላስገቡም። ለማስገባት የታችኛውን ቁልፎች ይጫኑ።"
       : "ℹ️ You have not submitted any payment receipts yet. Use the action panel below to start.";
-    return ctx.reply(noSubMsg, { parse_mode: 'Markdown' });
+    return ctx.reply(noSubMsg, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang) });
   }
 
   const ticket = res.rows[0];
@@ -566,7 +565,7 @@ bot.callbackQuery('cmd_status', async (ctx) => {
       : `\n• **Reason:** ${ticket.rejection_reason}\n\nTap 'Submit Payment' in the panel to re-upload.`;
   }
 
-  await ctx.reply(msg, { parse_mode: 'Markdown' });
+  await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang) });
 });
 
 bot.callbackQuery('cmd_history', async (ctx) => {
@@ -583,7 +582,7 @@ bot.callbackQuery('cmd_history', async (ctx) => {
     const noHistory = lang === 'am'
       ? "ℹ️ ምንም የተመዘገበ የክፍያ ታሪክ የለም።"
       : "ℹ️ No payment submission history found.";
-    return ctx.reply(noHistory, { parse_mode: 'Markdown' });
+    return ctx.reply(noHistory, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang) });
   }
 
   let text = lang === 'am'
@@ -605,14 +604,14 @@ bot.callbackQuery('cmd_history', async (ctx) => {
     text += `\n`;
   });
 
-  await ctx.reply(text, { parse_mode: 'Markdown' });
+  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang) });
 });
 
 bot.callbackQuery('cmd_help', async (ctx) => {
   await ctx.answerCallbackQuery();
   const lang = await getUserLang(ctx.from.id);
   const t = STRINGS[lang];
-  await ctx.reply(t.helpText, { parse_mode: 'Markdown' });
+  await ctx.reply(t.helpText, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang) });
 });
 
 bot.callbackQuery('start_resubmit', async (ctx) => {
@@ -750,7 +749,7 @@ bot.on('message', async (ctx) => {
     );
 
     if (activeCheck.rows.length > 0) {
-      return ctx.reply(t.pendingExists, { parse_mode: 'Markdown' });
+      return ctx.reply(t.pendingExists, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang) });
     }
 
     const username = ctx.from.username || ctx.from.first_name || 'Unknown';
@@ -791,7 +790,11 @@ bot.on('message', async (ctx) => {
 
       pendingDepartments.delete(userId);
 
-      await ctx.reply(t.receiptReceived, { parse_mode: 'Markdown' });
+      // ATTACH ACTION BUTTONS DIRECTLY TO CONFIRMATION MESSAGE
+      await ctx.reply(t.receiptReceived, { 
+        parse_mode: 'Markdown',
+        reply_markup: getStudentKeyboard(lang)
+      });
     } catch (err) {
       console.error("Failed to forward receipt:", err);
       return ctx.reply(`❌ Error submitting receipt: ${err.message}`);
