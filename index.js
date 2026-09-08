@@ -42,6 +42,15 @@ const pool = new Pool({
 });
 
 async function initDB() {
+  // Drop the old primary key constraint causing the crash if it exists
+  try {
+    await pool.query(`
+      ALTER TABLE department_topics DROP CONSTRAINT IF EXISTS department_topics_pkey;
+    `);
+  } catch (err) {
+    console.error("Error dropping old constraint:", err);
+  }
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS group_settings (
       group_id TEXT PRIMARY KEY,
@@ -71,6 +80,7 @@ async function initDB() {
     );
 
     CREATE TABLE IF NOT EXISTS department_topics (
+      id SERIAL PRIMARY KEY,
       group_id TEXT NOT NULL DEFAULT '',
       department TEXT NOT NULL,
       topic_id BIGINT
