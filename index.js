@@ -79,6 +79,14 @@ async function initDB() {
   `);
 }
 
+async function safeAnswer(ctx, text) {
+  try {
+    await ctx.answerCallbackQuery(text ? { text } : undefined);
+  } catch (err) {
+    // Ignore expired or invalid query errors silently
+  }
+}
+
 bot.use(async (ctx, next) => {
   if (ctx.message && ctx.message.text && ctx.match) {
     const botUsername = ctx.me?.username;
@@ -439,7 +447,7 @@ bot.command(['start', 'panel'], async (ctx) => {
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   const lang = ctx.match[1];
   userLanguages.set(ctx.from.id, lang);
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
 
   const t = STRINGS[lang];
 
@@ -450,7 +458,7 @@ bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
 });
 
 bot.callbackQuery('cmd_lookfor', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
   await ctx.reply(
     "🔍 **Search Student Record**\n\nReply directly to this message with a **User ID**, **@username**, or **Department**.",
     {
@@ -462,7 +470,7 @@ bot.callbackQuery('cmd_lookfor', async (ctx) => {
 });
 
 bot.callbackQuery('cmd_stats', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
   const topicId = ctx.callbackQuery.message.message_thread_id;
   const appSummary = await generateSummaryText('APPROVED');
   const rejSummary = await generateSummaryText('REJECTED');
@@ -470,13 +478,13 @@ bot.callbackQuery('cmd_stats', async (ctx) => {
 });
 
 bot.callbackQuery('cmd_export', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
   const topicId = ctx.callbackQuery.message.message_thread_id;
   await sendCSVExport(topicId, "📄 **Receipt Audit Export**");
 });
 
 bot.callbackQuery('cmd_broadcast', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
   await ctx.reply(
     "📢 **Send Student Announcement**\n\nReply directly to this message with the exact announcement text you want to send to all registered students.",
     {
@@ -488,7 +496,7 @@ bot.callbackQuery('cmd_broadcast', async (ctx) => {
 });
 
 bot.callbackQuery('cmd_submit', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
   const userId = ctx.from.id;
   const lang = userLanguages.get(userId) || 'en';
   const t = STRINGS[lang];
@@ -505,7 +513,7 @@ bot.callbackQuery(/^paytype_(reg|full)$/, async (ctx) => {
   const lang = userLanguages.get(userId) || 'en';
   const t = STRINGS[lang];
 
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
   await ctx.editMessageText(
     t.selectDept,
     { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard(planType) }
@@ -513,7 +521,7 @@ bot.callbackQuery(/^paytype_(reg|full)$/, async (ctx) => {
 });
 
 bot.callbackQuery('cmd_status', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
   const userId = ctx.from.id;
   const lang = userLanguages.get(userId) || 'en';
 
@@ -559,7 +567,7 @@ bot.callbackQuery('cmd_status', async (ctx) => {
 });
 
 bot.callbackQuery('cmd_history', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
   const userId = ctx.from.id;
   const lang = userLanguages.get(userId) || 'en';
 
@@ -598,14 +606,14 @@ bot.callbackQuery('cmd_history', async (ctx) => {
 });
 
 bot.callbackQuery('cmd_help', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
   const lang = userLanguages.get(ctx.from.id) || 'en';
   const t = STRINGS[lang];
   await ctx.reply(t.helpText, { parse_mode: 'Markdown' });
 });
 
 bot.callbackQuery('start_resubmit', async (ctx) => {
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
   const userId = ctx.from.id;
   const lang = userLanguages.get(userId) || 'en';
   const t = STRINGS[lang];
@@ -631,7 +639,7 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
 
   pendingDepartments.set(userId, fullTaggedDept);
 
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
   await ctx.editMessageText(
     t.sendReceiptPrompt.replace('{dept}', fullTaggedDept),
     { parse_mode: 'Markdown' }
@@ -643,7 +651,7 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
   const newDeptTagged = ctx.match[2];
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
 
   const ticketRes = await pool.query('SELECT topic_id, message_id, ticket_msg_id, username FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1', [targetUserId]);
 
@@ -793,7 +801,7 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   const topicId = Number(ctx.match[2]);
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
   
   const updateRes = await pool.query(
     "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING department, username",
@@ -839,7 +847,7 @@ bot.callbackQuery(/^rej_(\d+)_(\d+)$/, async (ctx) => {
   const userId = Number(ctx.match[1]);
   const topicId = Number(ctx.match[2]);
 
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
   await ctx.editMessageText("Select rejection reason:", {
     reply_markup: getRejectionReasonKeyboard(userId, topicId)
   });
@@ -858,7 +866,7 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   const reasonText = reasonObj ? reasonObj.label : "Receipt details unverified";
   const customMessage = reasonObj ? (lang === 'am' ? reasonObj.message_am : reasonObj.message_en) : "Please re-upload a valid payment receipt.";
 
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
 
   const updateRes = await pool.query(
     `UPDATE tickets 
@@ -899,7 +907,7 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
 
 bot.callbackQuery(/^trans_(\d+)$/, async (ctx) => {
   const userId = Number(ctx.match[1]);
-  await ctx.answerCallbackQuery();
+  await safeAnswer(ctx);
   await ctx.reply("📂 Select new department for transfer:", {
     reply_markup: getTransferKeyboard(userId)
   });
