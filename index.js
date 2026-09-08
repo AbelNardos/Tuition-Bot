@@ -812,9 +812,18 @@ bot.on('message', async (ctx) => {
       return ctx.reply(t.pendingExists, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, 'PENDING') });
     }
 
-    const username = ctx.from.username || ctx.from.first_name || 'Unknown';
-    const chosenDeptTagged = pendingDepartments.get(userId) || "General (Regular / Term)";
-    
+    const chosenDeptTagged = pendingDepartments.get(userId);
+    if (!chosenDeptTagged) {
+      const noDeptMsg = lang === 'am'
+        ? "⚠️ **እባክዎን መጀመሪያ ትምህርት ክፍል ይምረጡ**\n\nየመክፈያ ዓይነትዎን እና ትምህርት ክፍልዎን ለመምረጥ ከታች ያለውን ቁልፍ ይጫኑ።"
+        : "⚠️ **Please select your department first!**\n\nTap **Submit Payment** below to choose your payment plan and department before sending your receipt photo.";
+      
+      return ctx.reply(noDeptMsg, {
+        parse_mode: 'Markdown',
+        reply_markup: getStudentKeyboard(lang, null)
+      });
+    }
+
     const fileId = ctx.message.photo 
       ? ctx.message.photo[ctx.message.photo.length - 1].file_id 
       : (ctx.message.document ? ctx.message.document.file_id : null);
@@ -823,6 +832,8 @@ bot.on('message', async (ctx) => {
       await ctx.reply(t.noFileErr, { parse_mode: 'Markdown' });
       return;
     }
+
+    const username = ctx.from.username || ctx.from.first_name || 'Unknown';
 
     try {
       const topicId = await getOrCreateDepartmentTopic(ctx, chosenDeptTagged);
