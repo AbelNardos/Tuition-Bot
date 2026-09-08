@@ -95,6 +95,21 @@ async function setUserLang(userId, lang) {
   }
 }
 
+async function getUserStatus(userId) {
+  try {
+    const res = await pool.query(
+      'SELECT status FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1',
+      [userId]
+    );
+    if (res.rows.length > 0) {
+      return res.rows[0].status;
+    }
+  } catch (err) {
+    console.error("Error fetching user status:", err);
+  }
+  return null;
+}
+
 bot.use(async (ctx, next) => {
   if (ctx.message && ctx.message.text && ctx.match) {
     const botUsername = ctx.me?.username;
@@ -200,19 +215,30 @@ function getStaffKeyboard() {
     .text('📢 Broadcast', 'cmd_broadcast');
 }
 
-function getStudentKeyboard(lang = 'en') {
+function getStudentKeyboard(lang = 'en', status = null) {
+  const kb = new InlineKeyboard();
+
   if (lang === 'am') {
-    return new InlineKeyboard()
-      .text('📤 ደረሰኝ አስገባ', 'cmd_submit')
-      .text('📌 የደረሰኙን ሁኔታ ያረጋግጡ', 'cmd_status').row()
-      .text('📜 የክፍያ ታሪክ', 'cmd_history')
-      .text('❓ እርዳታ / እገዛ', 'cmd_help');
+    if (status === 'PENDING') {
+      kb.text('⏳ በግምገማ ላይ ነው', 'cmd_pending_info');
+    } else {
+      kb.text('📤 ደረሰኝ አስገባ', 'cmd_submit');
+    }
+    kb.text('📌 ሁኔታውን ያረጋግጡ', 'cmd_status').row();
+    kb.text('📜 የክፍያ ታሪክ', 'cmd_history');
+    kb.text('❓ እርዳታ / እገዛ', 'cmd_help');
+  } else {
+    if (status === 'PENDING') {
+      kb.text('⏳ Under Review', 'cmd_pending_info');
+    } else {
+      kb.text('📤 Submit Payment', 'cmd_submit');
+    }
+    kb.text('📌 Check Status', 'cmd_status').row();
+    kb.text('📜 My History', 'cmd_history');
+    kb.text('❓ Help / Support', 'cmd_help');
   }
-  return new InlineKeyboard()
-    .text('📤 Submit Payment', 'cmd_submit')
-    .text('📌 Check Status', 'cmd_status').row()
-    .text('📜 My History', 'cmd_history')
-    .text('❓ Help / Support', 'cmd_help');
+
+  return kb;
 }
 
 function getTransferKeyboard(userId) {
@@ -447,10 +473,11 @@ bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
 
   const t = STRINGS[lang];
+  const currentStatus = await getUserStatus(userId);
 
   await ctx.editMessageText(
     t.portalWelcome,
-    { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang) }
+    { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, currentStatus) }
   );
 });
 
@@ -504,6 +531,21 @@ bot.callbackQuery('cmd_submit', async (ctx) => {
   );
 });
 
+bot.callbackQuery('cmd_pending_info', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const userId = ctx.from.id;
+  const lang = await getUserLang(userId);
+  
+  const msg = lang === 'am'
+    ? "⏳ **ማመልከቻዎ በግምገማ ላይ ነው**\n\nየላኩት ደረሰኝ በበላይ ኃላፊዎች በመታየት ላይ ስለሆነ በአሁኑ ወቅት አዲስ ደረሰኝ መላክ አይችሉም። ውሳኔ ሲሰጥበት ወዲያውኑ ማሳወቂያ ይደርስዎታል።"
+    : "⏳ **Submission Under Review**\n\nYour submitted receipt is currently being verified by finance staff. Submitting a new receipt is disabled until staff completes the review process.";
+
+  await ctx.reply(msg, { 
+    parse_mode: 'Markdown', 
+    reply_markup: getStudentKeyboard(lang, 'PENDING') 
+  });
+});
+
 bot.callbackQuery(/^paytype_(reg|full)$/, async (ctx) => {
   const planType = ctx.match[1];
   const userId = ctx.from.id;
@@ -531,7 +573,7 @@ bot.callbackQuery('cmd_status', async (ctx) => {
     const noSubMsg = lang === 'am' 
       ? "ℹ️ እስከ አሁን ምንም ደረሰኝ አላስገቡም። ለማስገባት የታችኛውን ቁልፎች ይጫኑ።"
       : "ℹ️ You have not submitted any payment receipts yet. Use the action panel below to start.";
-    return ctx.reply(noSubMsg, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang) });
+    return ctx.reply(noSubMsg, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
   }
 
   const ticket = res.rows[0];
@@ -565,13 +607,14 @@ bot.callbackQuery('cmd_status', async (ctx) => {
       : `\n• **Reason:** ${ticket.rejection_reason}\n\nTap 'Submit Payment' in the panel to re-upload.`;
   }
 
-  await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang) });
+  await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, ticket.status) });
 });
 
 bot.callbackQuery('cmd_history', async (ctx) => {
   await ctx.answerCallbackQuery();
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
+  const currentStatus = await getUserStatus(userId);
 
   const res = await pool.query(
     'SELECT department, status, rejection_reason, created_at FROM tickets WHERE user_id = $1 ORDER BY created_at DESC',
@@ -582,7 +625,7 @@ bot.callbackQuery('cmd_history', async (ctx) => {
     const noHistory = lang === 'am'
       ? "ℹ️ ምንም የተመዘገበ የክፍያ ታሪክ የለም።"
       : "ℹ️ No payment submission history found.";
-    return ctx.reply(noHistory, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang) });
+    return ctx.reply(noHistory, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, currentStatus) });
   }
 
   let text = lang === 'am'
@@ -604,14 +647,16 @@ bot.callbackQuery('cmd_history', async (ctx) => {
     text += `\n`;
   });
 
-  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang) });
+  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, currentStatus) });
 });
 
 bot.callbackQuery('cmd_help', async (ctx) => {
   await ctx.answerCallbackQuery();
-  const lang = await getUserLang(ctx.from.id);
+  const userId = ctx.from.id;
+  const lang = await getUserLang(userId);
+  const currentStatus = await getUserStatus(userId);
   const t = STRINGS[lang];
-  await ctx.reply(t.helpText, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang) });
+  await ctx.reply(t.helpText, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, currentStatus) });
 });
 
 bot.callbackQuery('start_resubmit', async (ctx) => {
@@ -749,7 +794,7 @@ bot.on('message', async (ctx) => {
     );
 
     if (activeCheck.rows.length > 0) {
-      return ctx.reply(t.pendingExists, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang) });
+      return ctx.reply(t.pendingExists, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, 'PENDING') });
     }
 
     const username = ctx.from.username || ctx.from.first_name || 'Unknown';
@@ -790,10 +835,9 @@ bot.on('message', async (ctx) => {
 
       pendingDepartments.delete(userId);
 
-      // ATTACH ACTION BUTTONS DIRECTLY TO CONFIRMATION MESSAGE
       await ctx.reply(t.receiptReceived, { 
         parse_mode: 'Markdown',
-        reply_markup: getStudentKeyboard(lang)
+        reply_markup: getStudentKeyboard(lang, 'PENDING')
       });
     } catch (err) {
       console.error("Failed to forward receipt:", err);
