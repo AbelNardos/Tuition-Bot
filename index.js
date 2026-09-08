@@ -12,11 +12,7 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
-const bot = new Bot(process.env.BOT_TOKEN, {
-  client: {
-    canAutomaticallyAnswerCallbackQueries: true
-  }
-});
+const bot = new Bot(process.env.BOT_TOKEN);
 
 const STAFF_GROUP_ID = String(process.env.STAFF_GROUP_ID || '').trim();
 const APPROVED_THREAD_ID = process.env.APPROVED_THREAD_ID ? Number(process.env.APPROVED_THREAD_ID) : null;
@@ -63,24 +59,40 @@ async function initDB() {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS user_id BIGINT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS username TEXT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS receipt_file_id TEXT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS topic_id BIGINT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS message_id BIGINT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS ticket_msg_id BIGINT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS department TEXT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'PENDING';
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS processed_by TEXT;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-
     CREATE TABLE IF NOT EXISTS department_topics (
       department TEXT PRIMARY KEY,
       topic_id BIGINT
     );
+
+    CREATE TABLE IF NOT EXISTS user_settings (
+      user_id BIGINT PRIMARY KEY,
+      language TEXT DEFAULT 'en'
+    );
   `);
+}
+
+async function getUserLang(userId) {
+  try {
+    const res = await pool.query('SELECT language FROM user_settings WHERE user_id = $1', [userId]);
+    if (res.rows.length > 0) {
+      return res.rows[0].language;
+    }
+  } catch (err) {
+    console.error("Error fetching user language:", err);
+  }
+  return 'en';
+}
+
+async function setUserLang(userId, lang) {
+  try {
+    await pool.query(`
+      INSERT INTO user_settings (user_id, language) 
+      VALUES ($1, $2) 
+      ON CONFLICT (user_id) DO UPDATE SET language = EXCLUDED.language
+    `, [userId, lang]);
+  } catch (err) {
+    console.error("Error setting user language:", err);
+  }
 }
 
 bot.use(async (ctx, next) => {
@@ -97,40 +109,37 @@ bot.use(async (ctx, next) => {
 });
 
 const pendingDepartments = new Map();
-const userLanguages = new Map();
 
 const STRINGS = {
   en: {
-    portalWelcome: "👋 **Welcome to Renaissance Global Student Portal**\n\nSelect an option below to manage your tuition submissions:",
-    welcome: "👋 **Welcome to the Tuition Payment Portal!**",
+    portalWelcome: "👋 **Welcome to Renaissance Global Student Portal**\n\n🎯 **Quick Guide:**\n1️⃣ Select your payment type & department\n2️⃣ Upload a clear photo of your receipt\n3️⃣ Receive your official approval slip instantly upon verification!\n\nSelect an option below to begin:",
     selectPlan: "💳 **Step 1 of 2: Select Payment Type**\n\nPlease choose your payment plan:",
     selectDept: "📚 **Step 2 of 2: Select Your Department**\n\nPlease select your academic department below:",
-    receiptReceived: "✅ Your receipt has been sent to the staff review team. We will notify you once verified.",
+    receiptReceived: "✅ Your receipt has been successfully submitted and placed in the review queue. Track its progress anytime using 'Check Status'.",
     sendReceiptPrompt: "✅ Selected Department: **{dept}**\n\nNow, please send your receipt photo or screenshot with your Full Name and Student ID.",
     reuploadPrompt: "🔄 **Re-submitting Receipt**\nPlease choose your payment plan to initiate a new submission:",
-    approvedMsg: "✅ **Receipt Verified!**\nYour payment submission has been approved. Your official approval PDF slip is attached below.",
-    rejectedMsg: "❌ **Receipt Rejected**\n\n**Reason:** {reason}\n\n{message}",
+    approvedMsg: "✅ **Receipt Verified & Approved!**\nYour payment has been successfully cleared by our finance team. Your official approval PDF slip is attached below.",
+    rejectedMsg: "❌ **Receipt Needs Attention**\n\n**Reason:** {reason}\n\n{message}",
     reuploadBtn: "🔄 Re-upload Receipt",
     noFileErr: "⚠️ Please send an actual **photo or screenshot** of your payment receipt. Text-only messages cannot be processed as receipts.",
-    deptUpdated: "🔄 **Department Updated**\nYour receipt submission has been transferred to **{dept}**. Our review team will process your payment under this department.",
-    pendingExists: "⚠️ **Active Submission Pending**\n\nYou already have a receipt under review. Please wait for staff verification or check your status before submitting a new one.",
+    deptUpdated: "🔄 **Department Updated**\nYour receipt submission has been transferred to **{dept}**.",
+    pendingExists: "⚠️ **Active Submission Pending**\n\nYou already have a receipt under review. Check your live timeline status below.",
     helpText: "❓ **Need Assistance?**\n\nIf you have issues regarding your tuition payments or department registration, please contact the registrar office directly or submit your payment receipt photo."
   },
   am: {
-    portalWelcome: "👋 **እንኳን ወደ ሬነሳንስ ግሎባል የተማሪዎች ፖርታል በሰላም መጡ**\n\nየክፍያ ማመልከቻዎን ለማስተዳደር ከታች ካሉት አማራጮች አንዱን ይምረጡ፡",
-    welcome: "👋 **እንኳን ወደ ክፍያ መላኪያ ቦት በሰላም መጡ!**",
+    portalWelcome: "👋 **እንኳን ወደ ሬነሳንስ ግሎባል የተማሪዎች ፖርታል በሰላም መጡ**\n\n🎯 **ፈጣን መመሪያ:**\n1️⃣ የክፍያ ዓይነትዎን እና ትምህርት ክፍልዎን ይምረጡ\n2️⃣ ግልጽ የሆነ የክፍያ ደረሰኝ ፎቶ ይላኩ\n3️⃣ ሲረጋገጥ ይፋዊ ማረጋገጫ ፒዲኤፍዎን ወዲያውኑ ይቀበሉ!\n\nለመጀመር ከታች ካሉት አማራጮች አንዱን ይምረጡ፡",
     selectPlan: "💳 **ደረጃ 1 ከ 2፡ የክፍያ ዓይነት ይምረጡ**\n\nእባክዎን የክፍያ መጠን ዓይነትዎን ይምረጡ፡",
     selectDept: "📚 **ደረጃ 2 ከ 2፡ ትምህርት ክፍልዎን ይምረጡ**\n\nእባክዎን ትምህርት ክፍልዎን ከታች ካሉት ይምረጡ፡",
-    receiptReceived: "✅ ደረሰኝዎ ለክትትል ቡድኑ ተልኳል። እንደተረጋገጠ እናሳውቅዎታለን።",
+    receiptReceived: "✅ ደረሰኝዎ በትክክል ተልኳል። 'የደረሰኙን ሁኔታ ያረጋግጡ' የሚለውን በመጫን ሂደቱን መከታተል ይችላሉ።",
     sendReceiptPrompt: "✅ የተመረጠው ትምህርት ክፍል፡ **{dept}**\n\nአሁን እባክዎን የክፍያ ደረሰኝ ፎቶዎን ከሙሉ ስምዎ እና የተማሪ ID ጋር ይላኩ።",
     reuploadPrompt: "🔄 **ደረሰኝ እንደገና መላክ**\nእባክዎን አዲስ ማመልከቻ ለመጀመር የክፍያ ዓይነትዎን ይምረጡ፡",
-    approvedMsg: "✅ **ደረሰኝዎ ተረጋግጧል!**\nየክፍያ ማረጋገጫዎ ጸድቋል። ይፋዊ የማረጋገጫ ፒዲኤፍ ደረሰኝዎ ከታች ተያይዟል።",
-    rejectedMsg: "❌ **ደረሰኝዎ ውድቅ ተደርጓል**\n\n**ምክንያት:** {reason}\n\n{message}",
+    approvedMsg: "✅ **ደረሰኝዎ ተረጋግጦ ጸድቋል!**\nየክፍያ ማረጋገጫዎ ተፈቅዷል። ይፋዊ የማረጋገጫ ፒዲኤፍ ደረሰኝዎ ከታች ተያይዟል።",
+    rejectedMsg: "❌ **ደረሰኝዎ ማስተካከያ ይፈልጋል**\n\n**ምክንያት:** {reason}\n\n{message}",
     reuploadBtn: "🔄 ደረሰኝ እንደገና ስቀል",
     noFileErr: "⚠️ እባክዎን ትክክለኛ የክፍያ ደረሰኝ **ፎቶ ወይም ስክሪንሾት** ይላኩ። በጽሁፍ ብቻ የሚላክ መረጃ አይቀበልም።",
-    deptUpdated: "🔄 **ትምህርት ክፍል ተቀይሯል**\nየደረሰኝ ማመልከቻዎ ወደ **{dept}** ተዛውሯል። መረጃዎ በዚህ ትምህርት ክፍል ስር የሚታይ ይሆናል።",
-    pendingExists: "⚠️ **አሁንም በሂደት ላይ ያለ ማመልከቻ አለ**\n\nቀደም ሲል የላኩት ደረሰኝ በመገምገም ላይ ይገኛል። እባክዎን የቡድኑን ምላሽ ይጠብቁ።",
-    helpText: "❓ **እርዳታ ይፈልጋሉ?**\n\nበትምህርት ክፍያ ወይም በትምህርት ክፍል ምዝገባ ላይ ጥያቄ ወይም ችግር ካለዎት፣ እባክዎን የሬጅስትራር ቢሮውን በቀጥታ ያነጋግሩ ወይም የክፍያ ደረሰኝ ፎቶዎን ይላኩ።"
+    deptUpdated: "🔄 **ትምህርት ክፍል ተቀይሯል**\nየደረሰኝ ማመልከቻዎ ወደ **{dept}** ተዛውሯል።",
+    pendingExists: "⚠️ **አሁንም በሂደት ላይ ያለ ማመልከቻ አለ**\n\nቀደም ሲል የላኩት ደረሰኝ በመገምገም ላይ ይገኛል። ሁኔታውን ከታች ማየት ይችላሉ።",
+    helpText: "❓ **እርዳታ ይፈልጋሉ?**\n\nበትምህርት ክፍያ ወይም በትምህርት ክፍል ምዝገባ ላይ ጥያቄ ወይም ችግር ካለዎት፣ እባክዎን የሬጅስትራር ቢሮውን በቀጥታ ያነጋግሩ።"
   }
 };
 
@@ -157,7 +166,7 @@ const REJECTION_REASONS = [
     label: "👤 Name/ID Mismatch", 
     code: "mismatch",
     message_en: "The name or Student ID on the receipt does not match your profile details. Please re-upload a receipt that matches your credentials or contact administration.",
-    message_am: "በደረሰኙ ላይ ያለው ስም ወይም የተማሪ መታወቂያ ከተመዘገበው መረጃ ጋር አይመሳሰልም። እባክዎን ትክክለኛ መረጃ ያለው ደረሰኝ ይላኩ ወይም የአስተዳደር ክፍሉን ያነጋግሩ።"
+    message_am: "በደረሰኙ ላይ ያለው ስም ወይም የተማሪ መታወቂያ ከተመዘገበው መረጃ ጋር አይመሳሰልም። እባክዎን ትክክለኛ መረጃ ያለው ደረሰኝ ይላኩ።"
   }
 ];
 
@@ -208,22 +217,13 @@ function getStudentKeyboard(lang = 'en') {
 
 function getTransferKeyboard(userId) {
   return new InlineKeyboard()
-    .text("📈 Marketing", `tr_${userId}_mkt`)
-    .text("💼 Business", `tr_${userId}_bus`).row()
-    .text("🌾 Agribusiness", `tr_${userId}_agr`)
-    .text("📚 Ed. Planning", `tr_${userId}_edu`).row()
-    .text("📊 Accounting", `tr_${userId}_acc`)
-    .text("🚚 Logistics", `tr_${userId}_log`);
+    .text("📈 Marketing Mgmt", `tr_${userId}_Marketing Management (Regular / Term)`)
+    .text("💼 Business Mgmt", `tr_${userId}_Business Management (Regular / Term)`).row()
+    .text("🌾 Agribusiness & VCM", `tr_${userId}_Agribusiness and Value chain management (Regular / Term)`)
+    .text("📚 Ed. Planning", `tr_${userId}_Educational planning and management (Regular / Term)`).row()
+    .text("📊 Accounting & Finance", `tr_${userId}_Accounting and finance (Regular / Term)`)
+    .text("🚚 Logistics & SCM", `tr_${userId}_Logistics and Supply chain management (Regular / Term)`);
 }
-
-const TRANSFER_MAP = {
-  mkt: "Marketing Management",
-  bus: "Business Management",
-  agr: "Agribusiness and Value chain management",
-  edu: "Educational planning and management",
-  acc: "Accounting and finance",
-  log: "Logistics and Supply chain management"
-};
 
 function getRejectionReasonKeyboard(userId, topicId) {
   const kb = new InlineKeyboard();
@@ -442,7 +442,10 @@ bot.command(['start', 'panel'], async (ctx) => {
 
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   const lang = ctx.match[1];
-  userLanguages.set(ctx.from.id, lang);
+  const userId = ctx.from.id;
+  await setUserLang(userId, lang);
+  await ctx.answerCallbackQuery();
+
   const t = STRINGS[lang];
 
   await ctx.editMessageText(
@@ -452,6 +455,7 @@ bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
 });
 
 bot.callbackQuery('cmd_lookfor', async (ctx) => {
+  await ctx.answerCallbackQuery();
   await ctx.reply(
     "🔍 **Search Student Record**\n\nReply directly to this message with a **User ID**, **@username**, or **Department**.",
     {
@@ -463,6 +467,7 @@ bot.callbackQuery('cmd_lookfor', async (ctx) => {
 });
 
 bot.callbackQuery('cmd_stats', async (ctx) => {
+  await ctx.answerCallbackQuery();
   const topicId = ctx.callbackQuery.message.message_thread_id;
   const appSummary = await generateSummaryText('APPROVED');
   const rejSummary = await generateSummaryText('REJECTED');
@@ -470,11 +475,13 @@ bot.callbackQuery('cmd_stats', async (ctx) => {
 });
 
 bot.callbackQuery('cmd_export', async (ctx) => {
+  await ctx.answerCallbackQuery();
   const topicId = ctx.callbackQuery.message.message_thread_id;
   await sendCSVExport(topicId, "📄 **Receipt Audit Export**");
 });
 
 bot.callbackQuery('cmd_broadcast', async (ctx) => {
+  await ctx.answerCallbackQuery();
   await ctx.reply(
     "📢 **Send Student Announcement**\n\nReply directly to this message with the exact announcement text you want to send to all registered students.",
     {
@@ -486,8 +493,9 @@ bot.callbackQuery('cmd_broadcast', async (ctx) => {
 });
 
 bot.callbackQuery('cmd_submit', async (ctx) => {
+  await ctx.answerCallbackQuery();
   const userId = ctx.from.id;
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
   await ctx.reply(
@@ -499,18 +507,21 @@ bot.callbackQuery('cmd_submit', async (ctx) => {
 bot.callbackQuery(/^paytype_(reg|full)$/, async (ctx) => {
   const planType = ctx.match[1];
   const userId = ctx.from.id;
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
+  await ctx.answerCallbackQuery();
   await ctx.editMessageText(
     t.selectDept,
     { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard(planType) }
   );
 });
 
+// FEATURE 2: Visual Real-Time Status Tracker Timeline
 bot.callbackQuery('cmd_status', async (ctx) => {
+  await ctx.answerCallbackQuery();
   const userId = ctx.from.id;
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
 
   const res = await pool.query(
     'SELECT department, status, rejection_reason, updated_at FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1',
@@ -525,37 +536,43 @@ bot.callbackQuery('cmd_status', async (ctx) => {
   }
 
   const ticket = res.rows[0];
-  let statusEmoji = "⏳";
-  let statusText = lang === 'am' ? "በመጠባበቅ ላይ" : "Pending Review";
+  let timeline = "";
+  let statusText = "";
 
-  if (ticket.status === 'APPROVED') {
-    statusEmoji = "✅";
-    statusText = lang === 'am' ? "ተረጋግጧል" : "Approved";
+  if (ticket.status === 'PENDING') {
+    timeline = lang === 'am'
+      ? "📌 **የሂደት ሁኔታ ማሳያ (Timeline):**\n\n✅ 1. ደረሰኝ መላክ\n⏳ 2. የሰራተኞች ግምገማ (በሂደት ላይ...)\n❌ 3. ማጽደቅ / ፒዲኤፍ ማግኘት"
+      : "📌 **Live Progress Timeline:**\n\n✅ 1. Receipt Submitted\n⏳ 2. Staff Review (In Progress...)\n❌ 3. Approval & PDF Generation";
+    statusText = lang === 'am' ? "በመጠባበቅ ላይ (Pending Review)" : "Pending Review";
+  } else if (ticket.status === 'APPROVED') {
+    timeline = lang === 'am'
+      ? "📌 **የሂደት ሁኔታ ማሳያ (Timeline):**\n\n✅ 1. ደረሰኝ መላክ\n✅ 2. የሰራተኞች ግምገማ\n✅ 3. ጸድቋል & ፒዲኤፍ ተልኳል"
+      : "📌 **Live Progress Timeline:**\n\n✅ 1. Receipt Submitted\n✅ 2. Staff Review\n✅ 3. Approved & PDF Dispatched";
+    statusText = lang === 'am' ? "ተረጋግጧል (Approved)" : "Approved";
   } else if (ticket.status === 'REJECTED') {
-    statusEmoji = "❌";
-    statusText = lang === 'am' ? "ውድቅ ተደርጓል" : "Rejected";
+    timeline = lang === 'am'
+      ? "📌 **የሂደት ሁኔታ ማሳያ (Timeline):**\n\n✅ 1. ደረሰኝ መላክ\n✅ 2. ግምገማ ተጠናቋል\n❌ 3. ውድቅ ተደርጓል (ማስተካከያ ይፈልጋል)"
+      : "📌 **Live Progress Timeline:**\n\n✅ 1. Receipt Submitted\n✅ 2. Staff Review Completed\n❌ 3. Rejected (Action Required)";
+    statusText = lang === 'am' ? "ውድቅ ተደርጓል (Rejected)" : "Rejected";
   }
 
   let msg = lang === 'am' 
-    ? `📋 **የክፍያዎ ሁኔታ**\n\n• **ትምህርት ክፍል:** ${ticket.department}\n• **ሁኔታ:** ${statusEmoji} **${statusText}**\n`
-    : `📋 **Your Payment Status**\n\n• **Department:** ${ticket.department}\n• **Status:** ${statusEmoji} **${statusText}**\n`;
+    ? `📋 **የክፍያዎ ሁኔታ ማጠቃለያ**\n\n• **ትምህርት ክፍል:** ${ticket.department}\n• **ሁኔታ:** **${statusText}**\n\n${timeline}\n`
+    : `📋 **Your Payment Status Tracker**\n\n• **Department:** ${ticket.department}\n• **Status:** **${statusText}**\n\n${timeline}\n`;
   
   if (ticket.status === 'REJECTED' && ticket.rejection_reason) {
     msg += lang === 'am' 
-      ? `• **ምክንያት:** ${ticket.rejection_reason}\n\nእባክዎን አዲስ ደረሰኝ ለመላክ 'ደረሰኝ አስገባ' የሚለውን ይጫኑ።`
-      : `• **Reason:** ${ticket.rejection_reason}\n\nTap 'Submit Payment' in the panel to re-upload.`;
-  } else if (ticket.status === 'PENDING') {
-    msg += lang === 'am' 
-      ? `\nየክትትል ቡድኑ ደረሰኝዎን እየገመገመ ነው። እንደተጠናቀቀ እናሳውቅዎታለን።`
-      : `\nOur staff team is currently reviewing your receipt. We will notify you here once processed.`;
+      ? `\n• **ምክንያት:** ${ticket.rejection_reason}\n\nእባክዎን አዲስ ደረሰኝ ለመላክ 'ደረሰኝ አስገባ' የሚለውን ይጫኑ።`
+      : `\n• **Reason:** ${ticket.rejection_reason}\n\nTap 'Submit Payment' in the panel to re-upload.`;
   }
 
   await ctx.reply(msg, { parse_mode: 'Markdown' });
 });
 
 bot.callbackQuery('cmd_history', async (ctx) => {
+  await ctx.answerCallbackQuery();
   const userId = ctx.from.id;
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
 
   const res = await pool.query(
     'SELECT department, status, rejection_reason, created_at FROM tickets WHERE user_id = $1 ORDER BY created_at DESC',
@@ -592,14 +609,16 @@ bot.callbackQuery('cmd_history', async (ctx) => {
 });
 
 bot.callbackQuery('cmd_help', async (ctx) => {
-  const lang = userLanguages.get(ctx.from.id) || 'en';
+  await ctx.answerCallbackQuery();
+  const lang = await getUserLang(ctx.from.id);
   const t = STRINGS[lang];
   await ctx.reply(t.helpText, { parse_mode: 'Markdown' });
 });
 
 bot.callbackQuery('start_resubmit', async (ctx) => {
+  await ctx.answerCallbackQuery();
   const userId = ctx.from.id;
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
   pendingDepartments.delete(userId);
@@ -614,7 +633,7 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
   const isFull = ctx.match[1] === 'full';
   const baseDept = ctx.match[2];
   const userId = ctx.from.id;
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
   const fullTaggedDept = isFull 
@@ -623,26 +642,21 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
 
   pendingDepartments.set(userId, fullTaggedDept);
 
+  await ctx.answerCallbackQuery();
   await ctx.editMessageText(
     t.sendReceiptPrompt.replace('{dept}', fullTaggedDept),
     { parse_mode: 'Markdown' }
   );
 });
 
-bot.callbackQuery(/^tr_(\d+)_([a-z]+)$/, async (ctx) => {
+bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
   const targetUserId = Number(ctx.match[1]);
-  const shortCode = ctx.match[2];
-  const baseDept = TRANSFER_MAP[shortCode] || "Educational planning and management";
-  
-  const ticketRes = await pool.query('SELECT topic_id, message_id, ticket_msg_id, username, department FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1', [targetUserId]);
-
-  let isFull = false;
-  if (ticketRes.rows.length > 0 && ticketRes.rows[0].department.includes('4-Year Complete')) {
-    isFull = true;
-  }
-  
-  const newDeptTagged = isFull ? `${baseDept} (4-Year Complete)` : `${baseDept} (Regular / Term)`;
+  const newDeptTagged = ctx.match[2];
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
+
+  await ctx.answerCallbackQuery();
+
+  const ticketRes = await pool.query('SELECT topic_id, message_id, ticket_msg_id, username FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1', [targetUserId]);
 
   if (ticketRes.rows.length > 0) {
     const ticket = ticketRes.rows[0];
@@ -680,7 +694,7 @@ bot.callbackQuery(/^tr_(\d+)_([a-z]+)$/, async (ctx) => {
       `, [newDeptTagged, newTopicId, newTicketMsg.message_id, targetUserId]);
 
       try {
-        const studentLang = userLanguages.get(targetUserId) || 'en';
+        const studentLang = await getUserLang(targetUserId);
         const t = STRINGS[studentLang];
         await ctx.api.sendMessage(
           targetUserId,
@@ -727,7 +741,7 @@ bot.on('message', async (ctx) => {
 
   if (isPrivate) {
     const userId = ctx.from.id;
-    const lang = userLanguages.get(userId) || 'en';
+    const lang = await getUserLang(userId);
     const t = STRINGS[lang];
 
     const activeCheck = await pool.query(
@@ -789,6 +803,8 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   const userId = Number(ctx.match[1]);
   const topicId = Number(ctx.match[2]);
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
+
+  await ctx.answerCallbackQuery();
   
   const updateRes = await pool.query(
     "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING department, username",
@@ -801,7 +817,7 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
 
   const deptTag = updateRes.rows[0].department;
   const username = updateRes.rows[0].username || 'N/A';
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
   try {
@@ -834,7 +850,8 @@ bot.callbackQuery(/^rej_(\d+)_(\d+)$/, async (ctx) => {
   const userId = Number(ctx.match[1]);
   const topicId = Number(ctx.match[2]);
 
-  await ctx.editMessageText("Select rejection reason:", {
+  await ctx.answerCallbackQuery();
+  await ctx.reply("Select rejection reason:", {
     reply_markup: getRejectionReasonKeyboard(userId, topicId)
   });
 });
@@ -845,27 +862,25 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   const reasonCode = ctx.match[3];
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
-  const lang = userLanguages.get(userId) || 'en';
+  const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
   const reasonObj = REJECTION_REASONS.find(r => r.code === reasonCode);
   const reasonText = reasonObj ? reasonObj.label : "Receipt details unverified";
   const customMessage = reasonObj ? (lang === 'am' ? reasonObj.message_am : reasonObj.message_en) : "Please re-upload a valid payment receipt.";
 
+  await ctx.answerCallbackQuery();
+
   const updateRes = await pool.query(
     `UPDATE tickets 
      SET status = 'REJECTED', rejection_reason = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP 
-     WHERE user_id = $3 AND status = 'PENDING' 
-     RETURNING department, username`,
+     WHERE user_id = $3 AND status = 'PENDING'`,
     [reasonText, staffName, userId]
   );
 
   if (updateRes.rowCount === 0) {
     return ctx.reply("⚠️ Error: Could not find an active pending ticket record for this user.", { message_thread_id: topicId });
   }
-
-  const deptTag = updateRes.rows[0].department;
-  const username = updateRes.rows[0].username || 'N/A';
 
   const resubmitKeyboard = new InlineKeyboard().text(t.reuploadBtn, "start_resubmit");
 
@@ -875,10 +890,7 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
     { parse_mode: 'Markdown', reply_markup: resubmitKeyboard }
   );
 
-  await ctx.editMessageText(
-    `❌ Rejected Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${deptTag}\n• Rejected by: ${staffName}\n• Reason: ${reasonText}`,
-    { parse_mode: 'Markdown' }
-  );
+  await ctx.editMessageText(`❌ Receipt rejected by **${staffName}**.\n**Reason:** ${reasonText}`, { parse_mode: 'Markdown' });
 
   if (REJECTED_THREAD_ID) {
     await ctx.api.sendMessage(
@@ -891,6 +903,7 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
 
 bot.callbackQuery(/^trans_(\d+)$/, async (ctx) => {
   const userId = Number(ctx.match[1]);
+  await ctx.answerCallbackQuery();
   await ctx.reply("📂 Select new department for transfer:", {
     reply_markup: getTransferKeyboard(userId)
   });
