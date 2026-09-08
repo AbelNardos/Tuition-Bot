@@ -14,7 +14,6 @@ app.use(express.json());
 const PORT = process.env.PORT || 10000;
 const bot = new Bot(process.env.BOT_TOKEN, {
   client: {
-    // Automatically handles callback queries safely without manual answer calls
     canAutomaticallyAnswerCallbackQueries: true
   }
 });
@@ -209,13 +208,22 @@ function getStudentKeyboard(lang = 'en') {
 
 function getTransferKeyboard(userId) {
   return new InlineKeyboard()
-    .text("📈 Marketing Mgmt", `tr_${userId}_Marketing Management (Regular / Term)`)
-    .text("💼 Business Mgmt", `tr_${userId}_Business Management (Regular / Term)`).row()
-    .text("🌾 Agribusiness & VCM", `tr_${userId}_Agribusiness and Value chain management (Regular / Term)`)
-    .text("📚 Ed. Planning", `tr_${userId}_Educational planning and management (Regular / Term)`).row()
-    .text("📊 Accounting & Finance", `tr_${userId}_Accounting and finance (Regular / Term)`)
-    .text("🚚 Logistics & SCM", `tr_${userId}_Logistics and Supply chain management (Regular / Term)`);
+    .text("📈 Marketing", `tr_${userId}_mkt`)
+    .text("💼 Business", `tr_${userId}_bus`).row()
+    .text("🌾 Agribusiness", `tr_${userId}_agr`)
+    .text("📚 Ed. Planning", `tr_${userId}_edu`).row()
+    .text("📊 Accounting", `tr_${userId}_acc`)
+    .text("🚚 Logistics", `tr_${userId}_log`);
 }
+
+const TRANSFER_MAP = {
+  mkt: "Marketing Management",
+  bus: "Business Management",
+  agr: "Agribusiness and Value chain management",
+  edu: "Educational planning and management",
+  acc: "Accounting and finance",
+  log: "Logistics and Supply chain management"
+};
 
 function getRejectionReasonKeyboard(userId, topicId) {
   const kb = new InlineKeyboard();
@@ -621,12 +629,20 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
   );
 });
 
-bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
+bot.callbackQuery(/^tr_(\d+)_([a-z]+)$/, async (ctx) => {
   const targetUserId = Number(ctx.match[1]);
-  const newDeptTagged = ctx.match[2];
-  const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
+  const shortCode = ctx.match[2];
+  const baseDept = TRANSFER_MAP[shortCode] || "Educational planning and management";
+  
+  const ticketRes = await pool.query('SELECT topic_id, message_id, ticket_msg_id, username, department FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1', [targetUserId]);
 
-  const ticketRes = await pool.query('SELECT topic_id, message_id, ticket_msg_id, username FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1', [targetUserId]);
+  let isFull = false;
+  if (ticketRes.rows.length > 0 && ticketRes.rows[0].department.includes('4-Year Complete')) {
+    isFull = true;
+  }
+  
+  const newDeptTagged = isFull ? `${baseDept} (4-Year Complete)` : `${baseDept} (Regular / Term)`;
+  const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
   if (ticketRes.rows.length > 0) {
     const ticket = ticketRes.rows[0];
