@@ -69,36 +69,17 @@ async function initDB() {
       user_id BIGINT PRIMARY KEY,
       language TEXT DEFAULT 'en'
     );
+
+    CREATE TABLE IF NOT EXISTS department_topics (
+      group_id TEXT NOT NULL DEFAULT '',
+      department TEXT NOT NULL,
+      topic_id BIGINT
+    );
   `);
 
   try {
     await pool.query(`
       ALTER TABLE tickets ADD COLUMN IF NOT EXISTS panel_msg_id BIGINT;
-    `);
-
-    // Ensure department_topics exists with correct structure
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS department_topics (
-        group_id TEXT NOT NULL DEFAULT '',
-        department TEXT NOT NULL,
-        topic_id BIGINT,
-        PRIMARY KEY (group_id, department)
-      );
-    `);
-
-    // Migrate existing table constraints if it was created under old schemas
-    await pool.query(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM pg_constraint WHERE conname = 'department_topics_pkey'
-        ) THEN
-          ALTER TABLE department_topics DROP CONSTRAINT IF EXISTS department_topics_department_key;
-          ALTER TABLE department_topics ADD PRIMARY KEY (group_id, department);
-        END IF;
-      EXCEPTION WHEN OTHERS THEN
-        NULL;
-      END $$;
     `);
   } catch (err) {
     console.error("Migration check error:", err);
@@ -131,11 +112,12 @@ async function getUserLang(userId) {
 
 async function setUserLang(userId, lang) {
   try {
-    await pool.query(`
-      INSERT INTO user_settings (user_id, language) 
-      VALUES ($1, $2) 
-      ON CONFLICT (user_id) DO UPDATE SET language = EXCLUDED.language
-    `, [userId, lang]);
+    const check = await pool.query('SELECT 1 FROM user_settings WHERE user_id = $1', [userId]);
+    if (check.rows.length > 0) {
+      await pool.query('UPDATE user_settings SET language = $1 WHERE user_id = $2', [lang, userId]);
+    } else {
+      await pool.query('INSERT INTO user_settings (user_id, language) VALUES ($1, $2)', [userId, lang]);
+    }
   } catch (err) {
     console.error("Error setting user language:", err);
   }
@@ -327,10 +309,10 @@ async function generateApprovalPDF(userId, username, department, staffName) {
 
 bot.catch((err) => console.error('Error in bot framework:', err));
 
+// SAFE TOPIC RETRIEVAL / CREATION (No ON CONFLICT constraints used)
 async function getOrCreateDepartmentTopic(ctx, departmentName, targetGroupId) {
   const baseDepartment = departmentName.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
 
-  // Step 1: Check if topic already exists for this group and department
   const cached = await pool.query(
     'SELECT topic_id FROM department_topics WHERE group_id = $1 AND department = $2 LIMIT 1',
     [targetGroupId, baseDepartment]
@@ -340,18 +322,16 @@ async function getOrCreateDepartmentTopic(ctx, departmentName, targetGroupId) {
     return Number(cached.rows[0].topic_id);
   }
 
-  // Step 2: Create new Telegram Forum Topic
   const newTopic = await ctx.api.createForumTopic(targetGroupId, `📁 [${baseDepartment}]`);
   const topicId = newTopic.message_thread_id;
 
-  // Step 3: Insert or update safely without strict unique constraint dependency
   await pool.query(
-    `DELETE FROM department_topics WHERE group_id = $1 AND department = $2`,
+    'DELETE FROM department_topics WHERE group_id = $1 AND department = $2',
     [targetGroupId, baseDepartment]
   );
 
   await pool.query(
-    `INSERT INTO department_topics (group_id, department, topic_id) VALUES ($1, $2, $3)`,
+    'INSERT INTO department_topics (group_id, department, topic_id) VALUES ($1, $2, $3)',
     [targetGroupId, baseDepartment, topicId]
   );
 
@@ -498,11 +478,12 @@ bot.command('bind', async (ctx) => {
 
   const groupId = String(ctx.chat.id);
 
-  await pool.query(`
-    INSERT INTO group_settings (group_id, is_active) 
-    VALUES ($1, TRUE) 
-    ON CONFLICT (group_id) DO UPDATE SET is_active = TRUE, updated_at = CURRENT_TIMESTAMP
-  `, [groupId]);
+  const check = await pool.query('SELECT 1 FROM group_settings WHERE group_id = $1', [groupId]);
+  if (check.rows.length > 0) {
+    await pool.query('UPDATE group_settings SET is_active = TRUE, updated_at = CURRENT_TIMESTAMP WHERE group_id = $1', [groupId]);
+  } else {
+    await pool.query('INSERT INTO group_settings (group_id, is_active) VALUES ($1, TRUE)', [groupId]);
+  }
 
   await ctx.reply(
     "✅ **Group Bound Successfully!**\n\nThis group is now registered as the active Staff Panel. All student receipt submissions and department topics will be automatically managed here.",
