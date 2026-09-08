@@ -243,12 +243,12 @@ function getStudentKeyboard(lang = 'en', status = null) {
 
 function getTransferKeyboard(userId) {
   return new InlineKeyboard()
-    .text("📈 Marketing Mgmt", `tr_${userId}_Marketing Management (Regular / Term)`)
-    .text("💼 Business Mgmt", `tr_${userId}_Business Management (Regular / Term)`).row()
-    .text("🌾 Agribusiness & VCM", `tr_${userId}_Agribusiness and Value chain management (Regular / Term)`)
-    .text("📚 Ed. Planning", `tr_${userId}_Educational planning and management (Regular / Term)`).row()
-    .text("📊 Accounting & Finance", `tr_${userId}_Accounting and finance (Regular / Term)`)
-    .text("🚚 Logistics & SCM", `tr_${userId}_Logistics and Supply chain management (Regular / Term)`);
+    .text("📈 Marketing Mgmt", `tr_${userId}_mkt`)
+    .text("💼 Business Mgmt", `tr_${userId}_biz`).row()
+    .text("🌾 Agribusiness & VCM", `tr_${userId}_agri`)
+    .text("📚 Ed. Planning", `tr_${userId}_ed`).row()
+    .text("📊 Accounting & Finance", `tr_${userId}_acc`)
+    .text("🚚 Logistics & SCM", `tr_${userId}_log`);
 }
 
 function getRejectionReasonKeyboard(userId, topicId) {
@@ -693,7 +693,7 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
   );
 });
 
-bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
+bot.callbackQuery(/^tr_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   try {
     await ctx.answerCallbackQuery();
   } catch (e) {
@@ -701,7 +701,18 @@ bot.callbackQuery(/^tr_(\d+)_(.+)$/, async (ctx) => {
   }
 
   const targetUserId = Number(ctx.match[1]);
-  const newDeptTagged = ctx.match[2];
+  const deptCode = ctx.match[2];
+
+  const deptMap = {
+    mkt: "Marketing Management (Regular / Term)",
+    biz: "Business Management (Regular / Term)",
+    agri: "Agribusiness and Value chain management (Regular / Term)",
+    ed: "Educational planning and management (Regular / Term)",
+    acc: "Accounting and finance (Regular / Term)",
+    log: "Logistics and Supply chain management (Regular / Term)"
+  };
+
+  const newDeptTagged = deptMap[deptCode];
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
 
   const ticketRes = await pool.query('SELECT topic_id, message_id, ticket_msg_id, username FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1', [targetUserId]);
