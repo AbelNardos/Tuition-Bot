@@ -66,7 +66,7 @@ async function initDB() {
     );
 
     CREATE TABLE IF NOT EXISTS department_topics (
-      group_id TEXT,
+      group_id TEXT DEFAULT '',
       department TEXT,
       topic_id BIGINT,
       PRIMARY KEY (group_id, department)
@@ -81,6 +81,7 @@ async function initDB() {
   try {
     await pool.query(`
       ALTER TABLE tickets ADD COLUMN IF NOT EXISTS panel_msg_id BIGINT;
+      ALTER TABLE department_topics ADD COLUMN IF NOT EXISTS group_id TEXT DEFAULT '';
     `);
   } catch (err) {
     console.error("Migration check error:", err);
