@@ -51,6 +51,7 @@ async function initDB() {
       topic_id BIGINT,
       message_id BIGINT,
       ticket_msg_id BIGINT,
+      panel_msg_id BIGINT,
       department TEXT,
       status TEXT DEFAULT 'PENDING',
       rejection_reason TEXT,
@@ -133,7 +134,7 @@ const STRINGS = {
     receiptReceived: "✅ Your receipt has been successfully submitted and placed in the review queue. Track its progress anytime using 'Check Status'.",
     sendReceiptPrompt: "✅ Selected Department: **{dept}**\n\nNow, please send your receipt photo or screenshot with your Full Name and Student ID.",
     reuploadPrompt: "🔄 **Re-submitting Receipt**\nPlease choose your payment plan to initiate a new submission:",
-    approvedMsg: "✅ **Receipt Verified & Approved!**\nYour payment has been successfully cleared by our finance team. Your official approval PDF slip is attached below.",
+    approvedMsg: "✅ **Receipt Verified & Approved!**\nYour payment has been successfully cleared by our finance team.",
     rejectedMsg: "❌ **Receipt Needs Attention**\n\n**Reason:** {reason}\n\n{message}",
     reuploadBtn: "🔄 Re-upload Receipt",
     noFileErr: "⚠️ Please send an actual **photo or screenshot** of your payment receipt. Text-only messages cannot be processed as receipts.",
@@ -148,7 +149,7 @@ const STRINGS = {
     receiptReceived: "✅ ደረሰኝዎ በትክክል ተልኳል። 'የደረሰኙን ሁኔታ ያረጋግጡ' የሚለውን በመጫን ሂደቱን መከታተል ይችላሉ።",
     sendReceiptPrompt: "✅ የተመረጠው ትምህርት ክፍል፡ **{dept}**\n\nአሁን እባክዎን የክፍያ ደረሰኝ ፎቶዎን ከሙሉ ስምዎ እና የተማሪ ID ጋር ይላኩ።",
     reuploadPrompt: "🔄 **ደረሰኝ እንደገና መላክ**\nእባክዎን አዲስ ማመልከቻ ለመጀመር የክፍያ ዓይነትዎን ይምረጡ፡",
-    approvedMsg: "✅ **ደረሰኝዎ ተረጋግጦ ጸድቋል!**\nየክፍያ ማረጋገጫዎ ተፈቅዷል። ይፋዊ የማረጋገጫ ፒዲኤፍ ደረሰኝዎ ከታች ተያይዟል።",
+    approvedMsg: "✅ **ደረሰኝዎ ተረጋግጦ ጸድቋል!**\nየክፍያ ማረጋገጫዎ ተፈቅዷል።",
     rejectedMsg: "❌ **ደረሰኝዎ ማስተካከያ ይፈልጋል**\n\n**ምክንያት:** {reason}\n\n{message}",
     reuploadBtn: "🔄 ደረሰኝ እንደገና ስቀል",
     noFileErr: "⚠️ እባክዎን ትክክለኛ የክፍያ ደረሰኝ **ፎቶ ወይም ስክሪንሾት** ይላኩ። በጽሁፍ ብቻ የሚላክ መረጃ አይቀበልም።",
@@ -221,6 +222,8 @@ function getStudentKeyboard(lang = 'en', status = null) {
   if (lang === 'am') {
     if (status === 'PENDING') {
       kb.text('⏳ በግምገማ ላይ ነው', 'cmd_pending_info');
+    } else if (status === 'APPROVED') {
+      kb.text('⬇️ ደረሰኝ አውርድ', 'cmd_download_pdf');
     } else {
       kb.text('📤 ደረሰኝ አስገባ', 'cmd_submit');
     }
@@ -230,6 +233,8 @@ function getStudentKeyboard(lang = 'en', status = null) {
   } else {
     if (status === 'PENDING') {
       kb.text('⏳ Under Review', 'cmd_pending_info');
+    } else if (status === 'APPROVED') {
+      kb.text('⬇️ Download Receipt', 'cmd_download_pdf');
     } else {
       kb.text('📤 Submit Payment', 'cmd_submit');
     }
@@ -547,6 +552,38 @@ bot.callbackQuery('cmd_pending_info', async (ctx) => {
     parse_mode: 'Markdown', 
     reply_markup: getStudentKeyboard(lang, 'PENDING') 
   });
+});
+
+bot.callbackQuery('cmd_download_pdf', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const userId = ctx.from.id;
+  const lang = await getUserLang(userId);
+  const t = STRINGS[lang];
+
+  const res = await pool.query(
+    "SELECT department, username, processed_by FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1",
+    [userId]
+  );
+
+  if (res.rows.length === 0) {
+    return ctx.reply("⚠️ No approved receipt found for download.", { parse_mode: 'Markdown' });
+  }
+
+  const { department, username, processed_by } = res.rows[0];
+
+  try {
+    const pdfPath = await generateApprovalPDF(userId, username || 'N/A', department, processed_by || 'Finance Team');
+    await ctx.replyWithDocument(
+      new InputFile(pdfPath, `Tuition_Approval_Slip_${userId}.pdf`),
+      { caption: t.approvedMsg, parse_mode: 'Markdown' }
+    );
+    if (fs.existsSync(pdfPath)) {
+      fs.unlinkSync(pdfPath);
+    }
+  } catch (err) {
+    console.error("Error generating requested PDF:", err);
+    await ctx.reply("❌ Unable to generate PDF slip. Please try again later.");
+  }
 });
 
 bot.callbackQuery(/^paytype_(reg|full)$/, async (ctx) => {
@@ -923,17 +960,18 @@ bot.on('message', async (ctx) => {
         { message_thread_id: topicId, reply_markup: actionKeyboard }
       );
 
-      await pool.query(`
-        INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, department, status) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')
-      `, [userId, username, fileId, topicId, forwardedMsgId, sentTicketMsg.message_id, chosenDeptTagged]);
-
       pendingDepartments.delete(userId);
 
-      await ctx.reply(t.receiptReceived, { 
+      const studentPanelMsg = await ctx.reply(t.receiptReceived, { 
         parse_mode: 'Markdown',
         reply_markup: getStudentKeyboard(lang, 'PENDING')
       });
+
+      await pool.query(`
+        INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, panel_msg_id, department, status) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PENDING')
+      `, [userId, username, fileId, topicId, forwardedMsgId, sentTicketMsg.message_id, studentPanelMsg.message_id, chosenDeptTagged]);
+
     } catch (err) {
       console.error("Failed to forward receipt:", err);
       return ctx.reply(`❌ Error submitting receipt: ${err.message}`);
@@ -948,7 +986,7 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
   
   const updateRes = await pool.query(
-    "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING department, username",
+    "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING department, username, panel_msg_id",
     [staffName, userId]
   );
   
@@ -956,29 +994,32 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
     return ctx.reply("⚠️ Error: Could not find an active pending ticket record in the database for this user.", { message_thread_id: topicId });
   }
 
-  const deptTag = updateRes.rows[0].department;
-  const username = updateRes.rows[0].username || 'N/A';
+  const { department: deptTag, username, panel_msg_id } = updateRes.rows[0];
   const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
-  try {
-    const pdfPath = await generateApprovalPDF(userId, username, deptTag, staffName);
-    await ctx.api.sendDocument(
-      userId,
-      new InputFile(pdfPath, `Tuition_Approval_Slip_${userId}.pdf`),
-      { caption: t.approvedMsg, parse_mode: 'Markdown' }
-    );
-    if (fs.existsSync(pdfPath)) {
-      fs.unlinkSync(pdfPath);
+  if (panel_msg_id) {
+    try {
+      await ctx.api.editMessageReplyMarkup(userId, Number(panel_msg_id), {
+        reply_markup: getStudentKeyboard(lang, 'APPROVED')
+      });
+    } catch (err) {
+      console.error("Could not edit existing panel markup:", err);
     }
-  } catch (pdfErr) {
-    console.error("Failed to generate or send approval PDF:", pdfErr);
-    await ctx.api.sendMessage(userId, t.approvedMsg, { parse_mode: 'Markdown' });
+  }
+
+  try {
+    await ctx.api.sendMessage(userId, t.approvedMsg, {
+      parse_mode: 'Markdown',
+      reply_markup: getStudentKeyboard(lang, 'APPROVED')
+    });
+  } catch (err) {
+    console.error("Could not send approval update to student:", err);
   }
 
   try {
     await ctx.editMessageText(
-      `✅ Approved Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${deptTag}\n• Approved by: ${staffName}`,
+      `✅ Approved Submission\n• Student ID: ${userId}\n• Username: @${username || 'N/A'}\n• Department: ${deptTag}\n• Approved by: ${staffName}`,
       { parse_mode: 'Markdown' }
     );
   } catch (e) {}
@@ -1019,12 +1060,24 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   const updateRes = await pool.query(
     `UPDATE tickets 
      SET status = 'REJECTED', rejection_reason = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP 
-     WHERE user_id = $3 AND status = 'PENDING'`,
+     WHERE user_id = $3 AND status = 'PENDING' RETURNING panel_msg_id`,
     [reasonText, staffName, userId]
   );
 
   if (updateRes.rowCount === 0) {
     return ctx.reply("⚠️ Error: Could not find an active pending ticket record for this user.", { message_thread_id: topicId });
+  }
+
+  const { panel_msg_id } = updateRes.rows[0];
+
+  if (panel_msg_id) {
+    try {
+      await ctx.api.editMessageReplyMarkup(userId, Number(panel_msg_id), {
+        reply_markup: getStudentKeyboard(lang, 'REJECTED')
+      });
+    } catch (err) {
+      console.error("Could not edit panel markup on rejection:", err);
+    }
   }
 
   const resubmitKeyboard = new InlineKeyboard().text(t.reuploadBtn, "start_resubmit");
