@@ -14,7 +14,6 @@ app.use(express.json());
 const PORT = process.env.PORT || 10000;
 const bot = new Bot(process.env.BOT_TOKEN);
 
-const STAFF_GROUP_ID = String(process.env.STAFF_GROUP_ID || '').trim();
 const APPROVED_THREAD_ID = process.env.APPROVED_THREAD_ID ? Number(process.env.APPROVED_THREAD_ID) : null;
 const REJECTED_THREAD_ID = process.env.REJECTED_THREAD_ID ? Number(process.env.REJECTED_THREAD_ID) : null;
 
@@ -44,6 +43,12 @@ const pool = new Pool({
 
 async function initDB() {
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS group_settings (
+      group_id TEXT PRIMARY KEY,
+      is_active BOOLEAN DEFAULT TRUE,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS tickets (
       user_id BIGINT,
       username TEXT,
@@ -61,8 +66,10 @@ async function initDB() {
     );
 
     CREATE TABLE IF NOT EXISTS department_topics (
-      department TEXT PRIMARY KEY,
-      topic_id BIGINT
+      group_id TEXT,
+      department TEXT,
+      topic_id BIGINT,
+      PRIMARY KEY (group_id, department)
     );
 
     CREATE TABLE IF NOT EXISTS user_settings (
@@ -78,6 +85,18 @@ async function initDB() {
   } catch (err) {
     console.error("Migration check error:", err);
   }
+}
+
+async function getActiveStaffGroupId() {
+  try {
+    const res = await pool.query('SELECT group_id FROM group_settings WHERE is_active = TRUE ORDER BY updated_at DESC LIMIT 1');
+    if (res.rows.length > 0) {
+      return res.rows[0].group_id;
+    }
+  } catch (err) {
+    console.error("Error fetching active staff group ID:", err);
+  }
+  return String(process.env.STAFF_GROUP_ID || '').trim();
 }
 
 async function getUserLang(userId) {
@@ -290,22 +309,26 @@ async function generateApprovalPDF(userId, username, department, staffName) {
 
 bot.catch((err) => console.error('Error in bot framework:', err));
 
-async function getOrCreateDepartmentTopic(ctx, departmentName) {
+async function getOrCreateDepartmentTopic(ctx, departmentName, targetGroupId) {
   const baseDepartment = departmentName.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
 
-  const cached = await pool.query('SELECT topic_id FROM department_topics WHERE department = $1', [baseDepartment]);
+  const cached = await pool.query(
+    'SELECT topic_id FROM department_topics WHERE group_id = $1 AND department = $2',
+    [targetGroupId, baseDepartment]
+  );
+
   if (cached.rows.length > 0) {
     return Number(cached.rows[0].topic_id);
   }
 
-  const newTopic = await ctx.api.createForumTopic(STAFF_GROUP_ID, `📁 [${baseDepartment}]`);
+  const newTopic = await ctx.api.createForumTopic(targetGroupId, `📁 [${baseDepartment}]`);
   const topicId = newTopic.message_thread_id;
 
   await pool.query(`
-    INSERT INTO department_topics (department, topic_id) 
-    VALUES ($1, $2) 
-    ON CONFLICT(department) DO UPDATE SET topic_id = EXCLUDED.topic_id
-  `, [baseDepartment, topicId]);
+    INSERT INTO department_topics (group_id, department, topic_id) 
+    VALUES ($1, $2, $3) 
+    ON CONFLICT (group_id, department) DO UPDATE SET topic_id = EXCLUDED.topic_id
+  `, [targetGroupId, baseDepartment, topicId]);
 
   return topicId;
 }
@@ -331,7 +354,7 @@ async function generateSummaryText(statusType) {
   return text;
 }
 
-async function sendCSVExport(threadId, captionText) {
+async function sendCSVExport(staffGroupId, threadId, captionText) {
   try {
     const res = await pool.query(`
       SELECT user_id, username, department, status, rejection_reason, processed_by, created_at, updated_at 
@@ -340,7 +363,7 @@ async function sendCSVExport(threadId, captionText) {
     `);
 
     if (res.rows.length === 0) {
-      return bot.api.sendMessage(STAFF_GROUP_ID, "⚠️ No receipts found to export.", { message_thread_id: threadId });
+      return bot.api.sendMessage(staffGroupId, "⚠️ No receipts found to export.", { message_thread_id: threadId });
     }
 
     let csv = "Student Telegram ID,Username,Department & Tag,Status,Rejection Reason,Processed By,Created At,Updated At\n";
@@ -355,13 +378,13 @@ async function sendCSVExport(threadId, captionText) {
     fs.writeFileSync(filePath, csv);
 
     await bot.api.sendDocument(
-      STAFF_GROUP_ID,
+      staffGroupId,
       new InputFile(filePath, `Receipts_Audit_${new Date().toISOString().split('T')[0]}.csv`),
       { message_thread_id: threadId, caption: captionText, parse_mode: 'Markdown' }
     );
   } catch (err) {
     console.error("Export error:", err);
-    await bot.api.sendMessage(STAFF_GROUP_ID, `❌ Export error: ${err.message}`, { message_thread_id: threadId });
+    await bot.api.sendMessage(staffGroupId, `❌ Export error: ${err.message}`, { message_thread_id: threadId });
   }
 }
 
@@ -434,8 +457,37 @@ async function performBroadcast(ctx, topicId, broadcastMsg) {
   await ctx.reply(`✅ **Broadcast Complete**\n• Delivered: ${successCount}\n• Failed: ${failCount}`, { message_thread_id: topicId });
 }
 
+bot.command('bind', async (ctx) => {
+  if (ctx.chat.type === 'private') {
+    return ctx.reply("⚠️ This command must be executed inside a supergroup with topics/threads enabled.");
+  }
+
+  try {
+    const member = await ctx.getChatMember(ctx.from.id);
+    if (!['administrator', 'creator'].includes(member.status)) {
+      return ctx.reply("❌ Only group administrators can bind this group.");
+    }
+  } catch (err) {
+    console.error("Error checking permissions:", err);
+  }
+
+  const groupId = String(ctx.chat.id);
+
+  await pool.query(`
+    INSERT INTO group_settings (group_id, is_active) 
+    VALUES ($1, TRUE) 
+    ON CONFLICT (group_id) DO UPDATE SET is_active = TRUE, updated_at = CURRENT_TIMESTAMP
+  `, [groupId]);
+
+  await ctx.reply(
+    "✅ **Group Bound Successfully!**\n\nThis group is now registered as the active Staff Panel. All student receipt submissions and department topics will be automatically managed here.",
+    { parse_mode: 'Markdown' }
+  );
+});
+
 bot.command(['start', 'panel'], async (ctx) => {
-  const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
+  const staffGroupId = await getActiveStaffGroupId();
+  const isStaffGroup = String(ctx.chat.id) === staffGroupId;
   const isPrivate = ctx.chat.type === 'private';
 
   if (isStaffGroup) {
@@ -503,8 +555,9 @@ bot.callbackQuery('cmd_stats', async (ctx) => {
 
 bot.callbackQuery('cmd_export', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const staffGroupId = await getActiveStaffGroupId();
   const topicId = ctx.callbackQuery.message.message_thread_id;
-  await sendCSVExport(topicId, "📄 **Receipt Audit Export**");
+  await sendCSVExport(staffGroupId, topicId, "📄 **Receipt Audit Export**");
 });
 
 bot.callbackQuery('cmd_broadcast', async (ctx) => {
@@ -783,13 +836,16 @@ bot.callbackQuery(/^canceltrans_(\d+)_(\d+)$/, async (ctx) => {
 });
 
 bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
-  try {
-    await ctx.answerCallbackQuery();
-  } catch (e) {}
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
 
   const targetUserId = Number(ctx.match[1]);
   const originTopicId = Number(ctx.match[2]);
   const deptCode = ctx.match[3];
+  const staffGroupId = await getActiveStaffGroupId();
+
+  if (!staffGroupId) {
+    return ctx.reply("⚠️ Staff group configuration missing. Run /bind in your staff group.");
+  }
 
   const deptMap = {
     mkt: "Marketing Management (Regular / Term)",
@@ -818,10 +874,10 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   const ticket = ticketRes.rows[0];
   const username = ticket.username || 'Unknown';
 
-  const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged);
+  const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged, staffGroupId);
 
   try {
-    const newForwardRes = await ctx.api.copyMessage(STAFF_GROUP_ID, STAFF_GROUP_ID, Number(ticket.message_id), {
+    const newForwardRes = await ctx.api.copyMessage(staffGroupId, staffGroupId, Number(ticket.message_id), {
       message_thread_id: newTopicId
     });
 
@@ -831,7 +887,7 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
       .text("🔄 Transfer Dept", `trans_${targetUserId}_${newTopicId}`);
 
     const newTicketMsg = await ctx.api.sendMessage(
-      STAFF_GROUP_ID,
+      staffGroupId,
       `📥 New Submission\n• Student ID: ${targetUserId}\n• Username: @${username}\n• Department: ${newDeptTagged}`,
       { message_thread_id: newTopicId, reply_markup: actionKeyboard }
     );
@@ -844,7 +900,7 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
 
     if (ticket.message_id) {
       try {
-        await ctx.api.deleteMessage(STAFF_GROUP_ID, Number(ticket.message_id));
+        await ctx.api.deleteMessage(staffGroupId, Number(ticket.message_id));
       } catch (e) {
         console.error("Could not delete old receipt media message:", e);
       }
@@ -852,7 +908,7 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
 
     if (ticket.ticket_msg_id) {
       try {
-        await ctx.api.deleteMessage(STAFF_GROUP_ID, Number(ticket.ticket_msg_id));
+        await ctx.api.deleteMessage(staffGroupId, Number(ticket.ticket_msg_id));
       } catch (e) {
         console.error("Could not delete old action panel message:", e);
       }
@@ -878,7 +934,8 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
 bot.on('message', async (ctx) => {
   if (ctx.from && ctx.from.is_bot) return;
 
-  const isStaffGroup = String(ctx.chat.id) === STAFF_GROUP_ID;
+  const staffGroupId = await getActiveStaffGroupId();
+  const isStaffGroup = staffGroupId && String(ctx.chat.id) === staffGroupId;
   const isPrivate = ctx.chat.type === 'private';
   const topicId = ctx.message.message_thread_id;
 
@@ -933,12 +990,16 @@ bot.on('message', async (ctx) => {
       return;
     }
 
+    if (!staffGroupId) {
+      return ctx.reply("⚠️ System configuration incomplete: Staff group not registered. Please contact administration.");
+    }
+
     const username = ctx.from.username || ctx.from.first_name || 'Unknown';
 
     try {
-      const topicId = await getOrCreateDepartmentTopic(ctx, chosenDeptTagged);
+      const topicId = await getOrCreateDepartmentTopic(ctx, chosenDeptTagged, staffGroupId);
 
-      const forwardRes = await ctx.api.copyMessage(STAFF_GROUP_ID, ctx.chat.id, ctx.message.message_id, {
+      const forwardRes = await ctx.api.copyMessage(staffGroupId, ctx.chat.id, ctx.message.message_id, {
         message_thread_id: topicId
       });
       const forwardedMsgId = forwardRes.message_id;
@@ -949,7 +1010,7 @@ bot.on('message', async (ctx) => {
         .text("🔄 Transfer Dept", `trans_${userId}_${topicId}`);
 
       const sentTicketMsg = await ctx.api.sendMessage(
-        STAFF_GROUP_ID,
+        staffGroupId,
         `📥 New Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${chosenDeptTagged}`,
         { message_thread_id: topicId, reply_markup: actionKeyboard }
       );
@@ -978,7 +1039,8 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   const userId = Number(ctx.match[1]);
   const topicId = Number(ctx.match[2]);
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
-  
+  const staffGroupId = await getActiveStaffGroupId();
+
   const updateRes = await pool.query(
     "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING department, username, panel_msg_id",
     [staffName, userId]
@@ -1018,9 +1080,9 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
     );
   } catch (e) {}
 
-  if (APPROVED_THREAD_ID) {
+  if (APPROVED_THREAD_ID && staffGroupId) {
     const sortedReport = await generateSummaryText('APPROVED');
-    await ctx.api.sendMessage(STAFF_GROUP_ID, sortedReport, { message_thread_id: APPROVED_THREAD_ID, parse_mode: 'Markdown' });
+    await ctx.api.sendMessage(staffGroupId, sortedReport, { message_thread_id: APPROVED_THREAD_ID, parse_mode: 'Markdown' });
   }
 });
 
@@ -1043,6 +1105,7 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   const topicId = Number(ctx.match[2]);
   const reasonCode = ctx.match[3];
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
+  const staffGroupId = await getActiveStaffGroupId();
 
   const lang = await getUserLang(userId);
   const t = STRINGS[lang];
@@ -1086,9 +1149,9 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
     await ctx.editMessageText(`❌ Receipt rejected by **${staffName}**.\n**Reason:** ${reasonText}`, { parse_mode: 'Markdown' });
   } catch (e) {}
 
-  if (REJECTED_THREAD_ID) {
+  if (REJECTED_THREAD_ID && staffGroupId) {
     await ctx.api.sendMessage(
-      STAFF_GROUP_ID,
+      staffGroupId,
       `❌ **REJECTED RECEIPT**\n• Student ID: \`${userId}\`\n• Staff: **${staffName}**\n• Reason: ${reasonText}`,
       { message_thread_id: REJECTED_THREAD_ID, parse_mode: 'Markdown' }
     );
@@ -1097,6 +1160,9 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
 
 cron.schedule('0 8 * * *', async () => {
   try {
+    const staffGroupId = await getActiveStaffGroupId();
+    if (!staffGroupId) return;
+
     const appSummary = await generateSummaryText('APPROVED');
     const rejSummary = await generateSummaryText('REJECTED');
     
@@ -1105,7 +1171,7 @@ cron.schedule('0 8 * * *', async () => {
 
     const dailyReport = `🌅 **DAILY TUITION PORTAL SUMMARY**\n\n⏳ **Total Pending:** ${totalPending}\n\n---\n\n${appSummary}\n\n---\n\n${rejSummary}`;
 
-    await bot.api.sendMessage(STAFF_GROUP_ID, dailyReport, { message_thread_id: APPROVED_THREAD_ID || null });
+    await bot.api.sendMessage(staffGroupId, dailyReport, { message_thread_id: APPROVED_THREAD_ID || null });
   } catch (err) {
     console.error("Error generating daily summary cron report:", err);
   }
@@ -1127,7 +1193,8 @@ async function main() {
 
     await bot.api.setMyCommands([
       { command: 'start', description: 'Start payment receipt submission' },
-      { command: 'panel', description: 'Open interactive action panel' }
+      { command: 'panel', description: 'Open interactive action panel' },
+      { command: 'bind', description: 'Bind current group as staff panel (Admins only)' }
     ]);
   } catch (cmdErr) {
     console.error("Failed to register bot commands:", cmdErr.message);
