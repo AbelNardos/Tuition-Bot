@@ -70,6 +70,14 @@ async function initDB() {
       language TEXT DEFAULT 'en'
     );
   `);
+
+  try {
+    await pool.query(`
+      ALTER TABLE tickets ADD COLUMN IF NOT EXISTS panel_msg_id BIGINT;
+    `);
+  } catch (err) {
+    console.error("Migration check error:", err);
+  }
 }
 
 async function getUserLang(userId) {
