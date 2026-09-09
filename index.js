@@ -126,7 +126,7 @@ async function setUserLang(userId, lang) {
     if (check.rows.length > 0) {
       await pool.query('UPDATE user_settings SET language = $1 WHERE user_id = $2', [lang, userId]);
     } else {
-      await pool.query('INSERT INTO user_settings (user_id, language) VALUES ($1, $2)', [userId, lang]);
+      await pool.query('INSERT INTO user_settings (user_id, language) VALUES ($1, $2)', [lang, userId]);
     }
   } catch (err) {
     console.error("Error setting user language:", err);
@@ -863,19 +863,9 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
     return ctx.reply("⚠️ Staff group configuration missing. Run /bind in your staff group.");
   }
 
-  const deptMap = {
-    mkt: "Marketing Management (Regular / Term)",
-    biz: "Business Management (Regular / Term)",
-    agri: "Agribusiness and Value chain management (Regular / Term)",
-    ed: "Educational planning and management (Regular / Term)",
-    acc: "Accounting and finance (Regular / Term)",
-    log: "Logistics and Supply chain management (Regular / Term)"
-  };
-
-  const newDeptTagged = deptMap[deptCode];
-
+  // Fetch current ticket to preserve payment plan tag
   const ticketRes = await pool.query(
-    'SELECT topic_id, message_id, ticket_msg_id, username FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' ORDER BY updated_at DESC LIMIT 1',
+    'SELECT topic_id, message_id, ticket_msg_id, username, department FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' ORDER BY updated_at DESC LIMIT 1',
     [targetUserId, originTopicId]
   );
 
@@ -889,6 +879,24 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
 
   const ticket = ticketRes.rows[0];
   const username = ticket.username || 'Unknown';
+  const currentDept = ticket.department || '';
+
+  // Preserve original payment plan tag
+  let planSuffix = "(Regular / Term)";
+  if (currentDept.includes("(4-Year Complete)")) {
+    planSuffix = "(4-Year Complete)";
+  }
+
+  const baseDeptMap = {
+    mkt: "Marketing Management",
+    biz: "Business Management",
+    agri: "Agribusiness and Value chain management",
+    ed: "Educational planning and management",
+    acc: "Accounting and finance",
+    log: "Logistics and Supply chain management"
+  };
+
+  const newDeptTagged = `${baseDeptMap[deptCode]} ${planSuffix}`;
 
   const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged, staffGroupId);
 
