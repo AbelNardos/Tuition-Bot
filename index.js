@@ -25,6 +25,7 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception thrown:', err);
 });
 
+// Self Keep-Alive Ping
 setInterval(() => {
   const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
   if (RENDER_URL) {
@@ -38,15 +39,12 @@ setInterval(() => {
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
 async function initDB() {
-  // Drop the old primary key constraint causing the crash if it exists
   try {
-    await pool.query(`
-      ALTER TABLE department_topics DROP CONSTRAINT IF EXISTS department_topics_pkey;
-    `);
+    await pool.query('ALTER TABLE department_topics DROP CONSTRAINT IF EXISTS department_topics_pkey;');
   } catch (err) {
     console.error("Error dropping old constraint:", err);
   }
@@ -88,9 +86,7 @@ async function initDB() {
   `);
 
   try {
-    await pool.query(`
-      ALTER TABLE tickets ADD COLUMN IF NOT EXISTS panel_msg_id BIGINT;
-    `);
+    await pool.query('ALTER TABLE tickets ADD COLUMN IF NOT EXISTS panel_msg_id BIGINT;');
   } catch (err) {
     console.error("Migration check error:", err);
   }
@@ -150,62 +146,42 @@ const pendingDepartments = new Map();
 
 const STRINGS = {
   en: {
-    portalWelcome: "👋 **Welcome to Renaissance Global Student Portal**\n\n🎯 **Quick Guide:**\n1️⃣ Select your payment type & department\n2️⃣ Upload a clear photo of your receipt\n3️⃣ Receive your official approval slip instantly upon verification!\n\nSelect an option below to begin:",
-    selectPlan: "💳 **Step 1 of 2: Select Payment Type**\n\nPlease choose your payment plan:",
-    selectDept: "📚 **Step 2 of 2: Select Your Department**\n\nPlease select your academic department below:",
+    portalWelcome: "👋 Welcome to Renaissance Global Student Portal\n\n🎯 Quick Guide:\n1️⃣ Select your payment type & department\n2️⃣ Upload a clear photo of your receipt\n3️⃣ Receive your official approval slip instantly upon verification!\n\nSelect an option below to begin:",
+    selectPlan: "💳 Step 1 of 2: Select Payment Type\n\nPlease choose your payment plan:",
+    selectDept: "📚 Step 2 of 2: Select Your Department\n\nPlease select your academic department below:",
     receiptReceived: "✅ Your receipt has been successfully submitted and placed in the review queue. Track its progress anytime using 'Check Status'.",
-    sendReceiptPrompt: "✅ Selected Department: **{dept}**\n\nNow, please send your receipt photo or screenshot with your Full Name and Student ID.",
-    reuploadPrompt: "🔄 **Re-submitting Receipt**\nPlease choose your payment plan to initiate a new submission:",
-    approvedMsg: "✅ **Receipt Verified & Approved!**\nYour payment has been successfully cleared by our finance team.",
-    rejectedMsg: "❌ **Receipt Needs Attention**\n\n**Reason:** {reason}\n\n{message}",
+    sendReceiptPrompt: "✅ Selected Department: {dept}\n\nNow, please send your receipt photo or screenshot with your Full Name and Student ID.",
+    reuploadPrompt: "🔄 Re-submitting Receipt\nPlease choose your payment plan to initiate a new submission:",
+    approvedMsg: "✅ Receipt Verified & Approved!\nYour payment has been successfully cleared by our finance team.",
+    rejectedMsg: "❌ Receipt Needs Attention\n\nReason: {reason}\n\n{message}",
     reuploadBtn: "🔄 Re-upload Receipt",
-    noFileErr: "⚠️ Please send an actual **photo or screenshot** of your payment receipt. Text-only messages cannot be processed as receipts.",
-    deptUpdated: "🔄 **Department Updated**\nYour receipt submission has been transferred to **{dept}**.",
-    pendingExists: "⚠️ **Active Submission Pending**\n\nYou already have a receipt under review. Check your live timeline status below.",
-    helpText: "❓ **Need Assistance?**\n\nIf you have issues regarding your tuition payments or department registration, please contact the registrar office directly or submit your payment receipt photo."
+    noFileErr: "⚠️ Please send an actual photo or screenshot of your payment receipt. Text-only messages cannot be processed as receipts.",
+    deptUpdated: "🔄 Department Updated\nYour receipt submission has been transferred to {dept}.",
+    pendingExists: "⚠️ Active Submission Pending\n\nYou already have a receipt under review. Check your live timeline status below.",
+    helpText: "❓ Need Assistance?\n\nIf you have issues regarding your tuition payments or department registration, please contact the registrar office directly or submit your payment receipt photo."
   },
   am: {
-    portalWelcome: "👋 **እንኳን ወደ ሬነሳንስ ግሎባል የተማሪዎች ፖርታል በሰላም መጡ**\n\n🎯 **ፈጣን መመሪያ:**\n1️⃣ የክፍያ ዓይነትዎን እና ትምህርት ክፍልዎን ይምረጡ\n2️⃣ ግልጽ የሆነ የክፍያ ደረሰኝ ፎቶ ይላኩ\n3️⃣ ሲረጋገጥ ይፋዊ ማረጋገጫ ፒዲኤፍዎን ወዲያውኑ ይቀበሉ!\n\nለመጀመር ከታች ካሉት አማራጮች አንዱን ይምረጡ፡",
-    selectPlan: "💳 **ደረጃ 1 ከ 2፡ የክፍያ ዓይነት ይምረጡ**\n\nእባክዎን የክፍያ መጠን ዓይነትዎን ይምረጡ፡",
-    selectDept: "📚 **ደረጃ 2 ከ 2፡ ትምህርት ክፍልዎን ይምረጡ**\n\nእባክዎን ትምህርት ክፍልዎን ከታች ካሉት ይምረጡ፡",
+    portalWelcome: "👋 እንኳን ወደ ሬነሳንስ ግሎባል የተማሪዎች ፖርታል በሰላም መጡ\n\n🎯 ፈጣን መመሪያ:\n1️⃣ የክፍያ ዓይነትዎን እና ትምህርት ክፍልዎን ይምረጡ\n2️⃣ ግልጽ የሆነ የክፍያ ደረሰኝ ፎቶ ይላኩ\n3️⃣ ሲረጋገጥ ይፋዊ ማረጋገጫ ፒዲኤፍዎን ወዲያውኑ ይቀበሉ!\n\nለመጀመር ከታች ካሉት አማራጮች አንዱን ይምረጡ፡",
+    selectPlan: "💳 ደረጃ 1 ከ 2፡ የክፍያ ዓይነት ይምረጡ\n\nእባክዎን የክፍያ መጠን ዓይነትዎን ይምረጡ፡",
+    selectDept: "📚 ደረጃ 2 ከ 2፡ ትምህርት ክፍልዎን ይምረጡ\n\nእባክዎን ትምህርት ክፍልዎን ከታች ካሉት ይምረጡ፡",
     receiptReceived: "✅ ደረሰኝዎ በትክክል ተልኳል። 'የደረሰኙን ሁኔታ ያረጋግጡ' የሚለውን በመጫን ሂደቱን መከታተል ይችላሉ።",
-    sendReceiptPrompt: "✅ የተመረጠው ትምህርት ክፍል፡ **{dept}**\n\nአሁን እባክዎን የክፍያ ደረሰኝ ፎቶዎን ከሙሉ ስምዎ እና የተማሪ ID ጋር ይላኩ።",
-    reuploadPrompt: "🔄 **ደረሰኝ እንደገና መላክ**\nእባክዎን አዲስ ማመልከቻ ለመጀመር የክፍያ ዓይነትዎን ይምረጡ፡",
-    approvedMsg: "✅ **ደረሰኝዎ ተረጋግጦ ጸድቋል!**\nየክፍያ ማረጋገጫዎ ተፈቅዷል።",
-    rejectedMsg: "❌ **ደረሰኝዎ ማስተካከያ ይፈልጋል**\n\n**ምክንያት:** {reason}\n\n{message}",
+    sendReceiptPrompt: "✅ የተመረጠው ትምህርት ክፍል፡ {dept}\n\nአሁን እባክዎን የክፍያ ደረሰኝ ፎቶዎን ከሙሉ ስምዎ እና የተማሪ ID ጋር ይላኩ።",
+    reuploadPrompt: "🔄 ደረሰኝ እንደገና መላክ\nእባክዎን አዲስ ማመልከቻ ለመጀመር የክፍያ ዓይነትዎን ይምረጡ፡",
+    approvedMsg: "✅ ደረሰኝዎ ተረጋግጦ ጸድቋል!\nየክፍያ ማረጋገጫዎ ተፈቅዷል።",
+    rejectedMsg: "❌ ደረሰኝዎ ማስተካከያ ይፈልጋል\n\nምክንያት: {reason}\n\n{message}",
     reuploadBtn: "🔄 ደረሰኝ እንደገና ስቀል",
-    noFileErr: "⚠️ እባክዎን ትክክለኛ የክፍያ ደረሰኝ **ፎቶ ወይም ስክሪንሾት** ይላኩ። በጽሁፍ ብቻ የሚላክ መረጃ አይቀበልም።",
-    deptUpdated: "🔄 **ትምህርት ክፍል ተቀይሯል**\nየደረሰኝ ማመልከቻዎ ወደ **{dept}** ተዛውሯል።",
-    pendingExists: "⚠️ **አሁንም በሂደት ላይ ያለ ማመልከቻ አለ**\n\nቀደም ሲል የላኩት ደረሰኝ በመገምገም ላይ ይገኛል። ሁኔታውን ከታች ማየት ይችላሉ።",
-    helpText: "❓ **እርዳታ ይፈልጋሉ?**\n\nበትምህርት ክፍያ ወይም በትምህርት ክፍል ምዝገባ ላይ ጥያቄ ወይም ችግር ካለዎት፣ እባክዎን የሬጅስትራር ቢሮውን በቀጥታ ያነጋግሩ።"
+    noFileErr: "⚠️ እባክዎን ትክክለኛ የክፍያ ደረሰኝ ፎቶ ወይም ስክሪንሾት ይላኩ። በጽሁፍ ብቻ የሚላክ መረጃ አይቀበልም።",
+    deptUpdated: "🔄 ትምህርት ክፍል ተቀይሯል\nየደረሰኝ ማመልከቻዎ ወደ {dept} ተዛውሯል።",
+    pendingExists: "⚠️ አሁንም በሂደት ላይ ያለ ማመልከቻ አለ\n\nቀደም ሲል የላኩት ደረሰኝ በመገምገም ላይ ይገኛል። ሁኔታውን ከታች ማየት ይችላሉ።",
+    helpText: "❓ እርዳታ ይፈልጋሉ?\n\nበትምህርት ክፍያ ወይም በትምህርት ክፍል ምዝገባ ላይ ጥያቄ ወይም ችግር ካለዎት፣ እባክዎን የሬጅስትራር ቢሮውን በቀጥታ ያነጋግሩ።"
   }
 };
 
 const REJECTION_REASONS = [
-  { 
-    label: "📷 Blurry/Unreadable Receipt", 
-    code: "blurry",
-    message_en: "Please ensure your receipt image is clear, fully visible, and uncropped, then click below to re-upload.",
-    message_am: "እባክዎን የደረሰኝዎ ፎቶ ግልጽ፣ ሙሉ በሙሉ የሚታይ እና ያልተቆረጠ መሆኑን አረጋግተው እንደገና ይላኩ።"
-  },
-  { 
-    label: "💵 Incorrect Amount Paid", 
-    code: "amount",
-    message_en: "The payment amount does not match your required tuition fees. Please verify your transaction details and re-upload the correct receipt.",
-    message_am: "የተከፈለው የገንዘብ መጠን ከተፈለገው የትምህርት ክፍያ ጋር አይመሳሰልም። እባክዎን የትራንዛክሽን መረጃዎን አረጋግተው ትክክለኛውን ደረሰኝ ይላኩ።"
-  },
-  { 
-    label: "🚫 Invalid/Fake Receipt", 
-    code: "invalid",
-    message_en: "This receipt could not be verified by our finance team. Please submit an official bank transaction receipt.",
-    message_am: "ይህ ደረሰኝ በገንዘብ ያዥ ቡድኑ ሊረጋገጥ አልቻለም። እባክዎን ኦፊሴላዊ የባንክ ደረሰኝ ይላኩ።"
-  },
-  { 
-    label: "👤 Name/ID Mismatch", 
-    code: "mismatch",
-    message_en: "The name or Student ID on the receipt does not match your profile details. Please re-upload a receipt that matches your credentials or contact administration.",
-    message_am: "በደረሰኙ ላይ ያለው ስም ወይም የተማሪ መታወቂያ ከተመዘገበው መረጃ ጋር አይመሳሰልም። እባክዎን ትክክለኛ መረጃ ያለው ደረሰኝ ይላኩ።"
-  }
+  { label: "📷 Blurry/Unreadable Receipt", code: "blurry", message_en: "Please ensure your receipt image is clear, fully visible, and uncropped, then click below to re-upload.", message_am: "እባክዎን የደረሰኝዎ ፎቶ ግልጽ፣ ሙሉ በሙሉ የሚታይ እና ያልተቆረጠ መሆኑን አረጋግተው እንደገና ይላኩ።" },
+  { label: "💵 Incorrect Amount Paid", code: "amount", message_en: "The payment amount does not match your required tuition fees. Please verify your transaction details and re-upload the correct receipt.", message_am: "የተከፈለው የገንዘብ መጠን ከተፈለገው የትምህርት ክፍያ ጋር አይመሳሰልም። እባክዎን የትራንዛክሽን መረጃዎን አረጋግተው ትክክለኛውን ደረሰኝ ይላኩ።" },
+  { label: "🚫 Invalid/Fake Receipt", code: "invalid", message_en: "This receipt could not be verified by our finance team. Please submit an official bank transaction receipt.", message_am: "ይህ ደረሰኝ በገንዘብ ያዥ ቡድኑ ሊረጋገጥ አልቻለም። እባክዎን ኦፊሴላዊ የባንክ ደረሰኝ ይላኩ።" },
+  { label: "👤 Name/ID Mismatch", code: "mismatch", message_en: "The name or Student ID on the receipt does not match your profile details. Please re-upload a receipt that matches your credentials or contact administration.", message_am: "በደረሰኙ ላይ ያለው ስም ወይም የተማሪ መታወቂያ ከተመዘገበው መረጃ ጋር አይመሳሰልም። እባክዎን ትክክለኛ መረጃ ያለው ደረሰኝ ይላኩ።" }
 ];
 
 function getPaymentTypeKeyboard(lang = 'en') {
@@ -240,7 +216,6 @@ function getStaffKeyboard() {
 
 function getStudentKeyboard(lang = 'en', status = null) {
   const kb = new InlineKeyboard();
-
   if (lang === 'am') {
     if (status === 'PENDING') {
       kb.text('⏳ በግምገማ ላይ ነው', 'cmd_pending_info');
@@ -264,7 +239,6 @@ function getStudentKeyboard(lang = 'en', status = null) {
     kb.text('📜 My History', 'cmd_history');
     kb.text('❓ Help / Support', 'cmd_help');
   }
-
   return kb;
 }
 
@@ -319,44 +293,27 @@ async function generateApprovalPDF(userId, username, department, staffName) {
 
 bot.catch((err) => console.error('Error in bot framework:', err));
 
-// SAFE TOPIC RETRIEVAL / CREATION (No ON CONFLICT constraints used)
 async function getOrCreateDepartmentTopic(ctx, departmentName, targetGroupId) {
-  const baseDepartment = departmentName.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
-
+  const baseDepartment = departmentName.replace(/\s*(Regular \/ Term|4-Year Complete)$/, '').trim();
   const cached = await pool.query(
     'SELECT topic_id FROM department_topics WHERE group_id = $1 AND department = $2 LIMIT 1',
     [targetGroupId, baseDepartment]
   );
-
   if (cached.rows.length > 0) {
     return Number(cached.rows[0].topic_id);
   }
-
   const newTopic = await ctx.api.createForumTopic(targetGroupId, `📁 [${baseDepartment}]`);
   const topicId = newTopic.message_thread_id;
-
-  await pool.query(
-    'DELETE FROM department_topics WHERE group_id = $1 AND department = $2',
-    [targetGroupId, baseDepartment]
-  );
-
-  await pool.query(
-    'INSERT INTO department_topics (group_id, department, topic_id) VALUES ($1, $2, $3)',
-    [targetGroupId, baseDepartment, topicId]
-  );
-
+  await pool.query('DELETE FROM department_topics WHERE group_id = $1 AND department = $2', [targetGroupId, baseDepartment]);
+  await pool.query('INSERT INTO department_topics (group_id, department, topic_id) VALUES ($1, $2, $3)', [targetGroupId, baseDepartment, topicId]);
   return topicId;
 }
 
 async function generateSummaryText(statusType) {
-  const res = await pool.query(`
-    SELECT department, COUNT(*) as count 
-    FROM tickets 
-    WHERE status = $1 
-    GROUP BY department 
-    ORDER BY department ASC
-  `, [statusType]);
-
+  const res = await pool.query(
+    `SELECT department, COUNT(*) as count FROM tickets WHERE status = $1 GROUP BY department ORDER BY department ASC`,
+    [statusType]
+  );
   const icon = statusType === 'APPROVED' ? '✅' : '❌';
   let text = `📊 **${icon} ${statusType} RECEIPTS SUMMARY**\n\n`;
   if (res.rows.length === 0) {
@@ -371,12 +328,9 @@ async function generateSummaryText(statusType) {
 
 async function sendCSVExport(staffGroupId, threadId, captionText) {
   try {
-    const res = await pool.query(`
-      SELECT user_id, username, department, status, rejection_reason, processed_by, created_at, updated_at 
-      FROM tickets 
-      ORDER BY department ASC, status ASC, updated_at DESC
-    `);
-
+    const res = await pool.query(
+      `SELECT user_id, username, department, status, rejection_reason, processed_by, created_at, updated_at FROM tickets ORDER BY department ASC, status ASC, updated_at DESC`
+    );
     if (res.rows.length === 0) {
       return bot.api.sendMessage(staffGroupId, "⚠️ No receipts found to export.", { message_thread_id: threadId });
     }
@@ -405,26 +359,17 @@ async function sendCSVExport(staffGroupId, threadId, captionText) {
 
 async function performSearch(ctx, query, topicId) {
   const cleanQuery = query.replace(/^@/, '');
-
   const res = await pool.query(
     `SELECT user_id, username, department, status, rejection_reason, processed_by, created_at, updated_at 
      FROM tickets 
-     WHERE user_id::text = $1 
-        OR LOWER(username) = LOWER($1) 
-        OR LOWER(department) LIKE LOWER($2)
+     WHERE user_id::text = $1 OR LOWER(username) = LOWER($1) OR LOWER(department) LIKE LOWER($2) 
      ORDER BY updated_at DESC LIMIT 10`,
     [cleanQuery, `%${cleanQuery}%`]
   );
-
   if (res.rows.length === 0) {
-    return ctx.reply(`🔍 No receipts found matching: **${query}**`, { 
-      message_thread_id: topicId, 
-      parse_mode: 'Markdown' 
-    });
+    return ctx.reply(`🔍 No receipts found matching: \`${query}\``, { message_thread_id: topicId, parse_mode: 'Markdown' });
   }
-
   let text = `🔍 **SEARCH RESULTS FOR:** \`${query}\` (${res.rows.length})\n\n`;
-
   res.rows.forEach((r, idx) => {
     let statusEmoji = "⏳";
     if (r.status === 'APPROVED') statusEmoji = "✅";
@@ -443,7 +388,6 @@ async function performSearch(ctx, query, topicId) {
     }
     text += `\n`;
   });
-
   await ctx.reply(text, { message_thread_id: topicId, parse_mode: 'Markdown' });
 }
 
@@ -451,10 +395,8 @@ async function performBroadcast(ctx, topicId, broadcastMsg) {
   if (!broadcastMsg) {
     return ctx.reply("⚠️ Broadcast text cannot be empty.", { message_thread_id: topicId });
   }
-
   const usersRes = await pool.query('SELECT DISTINCT user_id FROM tickets');
-  const userIds = usersRes.rows.map(r => r.user_id);
-
+  const userIds = usersRes.rows.map((r) => r.user_id);
   let successCount = 0;
   let failCount = 0;
 
@@ -468,15 +410,14 @@ async function performBroadcast(ctx, topicId, broadcastMsg) {
       failCount++;
     }
   }
-
   await ctx.reply(`✅ **Broadcast Complete**\n• Delivered: ${successCount}\n• Failed: ${failCount}`, { message_thread_id: topicId });
 }
 
+// Commands
 bot.command('bind', async (ctx) => {
   if (ctx.chat.type === 'private') {
     return ctx.reply("⚠️ This command must be executed inside a supergroup with topics/threads enabled.");
   }
-
   try {
     const member = await ctx.getChatMember(ctx.from.id);
     if (!['administrator', 'creator'].includes(member.status)) {
@@ -487,7 +428,6 @@ bot.command('bind', async (ctx) => {
   }
 
   const groupId = String(ctx.chat.id);
-
   const check = await pool.query('SELECT 1 FROM group_settings WHERE group_id = $1', [groupId]);
   if (check.rows.length > 0) {
     await pool.query('UPDATE group_settings SET is_active = TRUE, updated_at = CURRENT_TIMESTAMP WHERE group_id = $1', [groupId]);
@@ -496,7 +436,7 @@ bot.command('bind', async (ctx) => {
   }
 
   await ctx.reply(
-    "✅ **Group Bound Successfully!**\n\nThis group is now registered as the active Staff Panel. All student receipt submissions and department topics will be automatically managed here.",
+    "✅ Group Bound Successfully!\n\nThis group is now registered as the active Staff Panel. All student receipt submissions and department topics will be automatically managed here.",
     { parse_mode: 'Markdown' }
   );
 });
@@ -509,12 +449,8 @@ bot.command(['start', 'panel'], async (ctx) => {
   if (isStaffGroup) {
     const topicId = ctx.message.message_thread_id;
     return ctx.reply(
-      "⚙️ **RENAISSANCE GLOBAL — STAFF ACTION PANEL**\n\nSelect an action below:",
-      {
-        message_thread_id: topicId,
-        parse_mode: 'Markdown',
-        reply_markup: getStaffKeyboard()
-      }
+      "⚙️ RENAISSANCE GLOBAL — STAFF ACTION PANEL\n\nSelect an action below:",
+      { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: getStaffKeyboard() }
     );
   }
 
@@ -533,6 +469,7 @@ bot.command(['start', 'panel'], async (ctx) => {
   }
 });
 
+// Callback Queries
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const lang = ctx.match[1];
@@ -540,7 +477,6 @@ bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   await setUserLang(userId, lang);
 
   const t = STRINGS[lang];
-
   try {
     await ctx.editMessageText(
       t.portalWelcome,
@@ -552,12 +488,8 @@ bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
 bot.callbackQuery('cmd_lookfor', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   await ctx.reply(
-    "🔍 **Search Student Record**\n\nReply directly to this message with a **User ID**, **@username**, or **Department**.",
-    {
-      message_thread_id: ctx.callbackQuery.message.message_thread_id,
-      parse_mode: 'Markdown',
-      reply_markup: { force_reply: true }
-    }
+    "🔍 Search Student Record\n\nReply directly to this message with a User ID, @username, or Department.",
+    { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'Markdown', reply_markup: { force_reply: true } }
   );
 });
 
@@ -573,18 +505,14 @@ bot.callbackQuery('cmd_export', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const staffGroupId = await getActiveStaffGroupId();
   const topicId = ctx.callbackQuery.message.message_thread_id;
-  await sendCSVExport(staffGroupId, topicId, "📄 **Receipt Audit Export**");
+  await sendCSVExport(staffGroupId, topicId, "📄 Receipt Audit Export");
 });
 
 bot.callbackQuery('cmd_broadcast', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   await ctx.reply(
-    "📢 **Send Student Announcement**\n\nReply directly to this message with the exact announcement text you want to send to all registered students.",
-    {
-      message_thread_id: ctx.callbackQuery.message.message_thread_id,
-      parse_mode: 'Markdown',
-      reply_markup: { force_reply: true }
-    }
+    "📢 Send Student Announcement\n\nReply directly to this message with the exact announcement text you want to send to all registered students.",
+    { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'Markdown', reply_markup: { force_reply: true } }
   );
 });
 
@@ -594,25 +522,18 @@ bot.callbackQuery('cmd_submit', async (ctx) => {
   const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
-  await ctx.reply(
-    t.selectPlan,
-    { parse_mode: 'Markdown', reply_markup: getPaymentTypeKeyboard(lang) }
-  );
+  await ctx.reply(t.selectPlan, { parse_mode: 'Markdown', reply_markup: getPaymentTypeKeyboard(lang) });
 });
 
 bot.callbackQuery('cmd_pending_info', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
-  
-  const msg = lang === 'am'
-    ? "⏳ **ማመልከቻዎ በግምገማ ላይ ነው**\n\nየላኩት ደረሰኝ በበላይ ኃላፊዎች በመታየት ላይ ስለሆነ በአሁኑ ወቅት አዲስ ደረሰኝ መላክ አይችሉም። ውሳኔ ሲሰጥበት ወዲያውኑ ማሳወቂያ ይደርስዎታል።"
-    : "⏳ **Submission Under Review**\n\nYour submitted receipt is currently being verified by finance staff. Submitting a new receipt is disabled until staff completes the review process.";
 
-  await ctx.reply(msg, { 
-    parse_mode: 'Markdown', 
-    reply_markup: getStudentKeyboard(lang, 'PENDING') 
-  });
+  const msg = lang === 'am' 
+    ? "⏳ ማመልከቻዎ በግምገማ ላይ ነው\n\nየላኩት ደረሰኝ በበላይ ኃላፊዎች በመታየት ላይ ስለሆነ በአሁኑ ወቅት አዲስ ደረሰኝ መላክ አይችሉም። ውሳኔ ሲሰጥበት ወዲያውኑ ማሳወቂያ ይደርስዎታል።" 
+    : "⏳ Submission Under Review\n\nYour submitted receipt is currently being verified by finance staff. Submitting a new receipt is disabled until staff completes the review process.";
+  await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, 'PENDING') });
 });
 
 bot.callbackQuery('cmd_download_pdf', async (ctx) => {
@@ -625,11 +546,9 @@ bot.callbackQuery('cmd_download_pdf', async (ctx) => {
     "SELECT department, username, processed_by FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1",
     [userId]
   );
-
   if (res.rows.length === 0) {
     return ctx.reply("⚠️ No approved receipt found for download.", { parse_mode: 'Markdown' });
   }
-
   const { department, username, processed_by } = res.rows[0];
 
   try {
@@ -655,10 +574,7 @@ bot.callbackQuery(/^paytype_(reg|full)$/, async (ctx) => {
   const t = STRINGS[lang];
 
   try {
-    await ctx.editMessageText(
-      t.selectDept,
-      { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard(planType) }
-    );
+    await ctx.editMessageText(t.selectDept, { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard(planType) });
   } catch (e) {}
 });
 
@@ -671,11 +587,8 @@ bot.callbackQuery('cmd_status', async (ctx) => {
     'SELECT department, status, rejection_reason, updated_at FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1',
     [userId]
   );
-
   if (res.rows.length === 0) {
-    const noSubMsg = lang === 'am' 
-      ? "ℹ️ እስከ አሁን ምንም ደረሰኝ አላስገቡም። ለማስገባት የታችኛውን ቁልፎች ይጫኑ።"
-      : "ℹ️ You have not submitted any payment receipts yet. Use the action panel below to start.";
+    const noSubMsg = lang === 'am' ? "ℹ️ እስከ አሁን ምንም ደረሰኝ አላስገቡም። ለማስገባት የታችኛውን ቁልፎች ይጫኑ።" : "ℹ️ You have not submitted any payment receipts yet. Use the action panel below to start.";
     return ctx.reply(noSubMsg, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
   }
 
@@ -684,32 +597,29 @@ bot.callbackQuery('cmd_status', async (ctx) => {
   let statusText = "";
 
   if (ticket.status === 'PENDING') {
-    timeline = lang === 'am'
-      ? "📌 **የሂደት ሁኔታ ማሳያ (Timeline):**\n\n✅ 1. ደረሰኝ መላክ\n⏳ 2. የሰራተኞች ግምገማ (በሂደት ላይ...)\n❌ 3. ማጽደቅ / ፒዲኤፍ ማግኘት"
-      : "📌 **Live Progress Timeline:**\n\n✅ 1. Receipt Submitted\n⏳ 2. Staff Review (In Progress...)\n❌ 3. Approval & PDF Generation";
+    timeline = lang === 'am' 
+      ? "📌 የሂደት ሁኔታ ማሳያ (Timeline):\n\n✅ 1. ደረሰኝ መላክ\n⏳ 2. የሰራተኞች ግምገማ (በሂደት ላይ...)\n❌ 3. ማጽደቅ / ፒዲኤፍ ማግኘት" 
+      : "📌 Live Progress Timeline:\n\n✅ 1. Receipt Submitted\n⏳ 2. Staff Review (In Progress...)\n❌ 3. Approval & PDF Generation";
     statusText = lang === 'am' ? "በመጠባበቅ ላይ (Pending Review)" : "Pending Review";
   } else if (ticket.status === 'APPROVED') {
-    timeline = lang === 'am'
-      ? "📌 **የሂደት ሁኔታ ማሳያ (Timeline):**\n\n✅ 1. ደረሰኝ መላክ\n✅ 2. የሰራተኞች ግምገማ\n✅ 3. ጸድቋል & ፒዲኤፍ ተልኳል"
-      : "📌 **Live Progress Timeline:**\n\n✅ 1. Receipt Submitted\n✅ 2. Staff Review\n✅ 3. Approved & PDF Dispatched";
+    timeline = lang === 'am' 
+      ? "📌 የሂደት ሁኔታ ማሳያ (Timeline):\n\n✅ 1. ደረሰኝ መላክ\n✅ 2. የሰራተኞች ግምገማ\n✅ 3. ጸድቋል & ፒዲኤፍ ተልኳል" 
+      : "📌 Live Progress Timeline:\n\n✅ 1. Receipt Submitted\n✅ 2. Staff Review\n✅ 3. Approved & PDF Dispatched";
     statusText = lang === 'am' ? "ተረጋግጧል (Approved)" : "Approved";
   } else if (ticket.status === 'REJECTED') {
-    timeline = lang === 'am'
-      ? "📌 **የሂደት ሁኔታ ማሳያ (Timeline):**\n\n✅ 1. ደረሰኝ መላክ\n✅ 2. ግምገማ ተጠናቋል\n❌ 3. ውድቅ ተደርጓል (ማስተካከያ ይፈልጋል)"
-      : "📌 **Live Progress Timeline:**\n\n✅ 1. Receipt Submitted\n✅ 2. Staff Review Completed\n❌ 3. Rejected (Action Required)";
+    timeline = lang === 'am' 
+      ? "📌 የሂደት ሁኔታ ማሳያ (Timeline):\n\n✅ 1. ደረሰኝ መላክ\n✅ 2. ግምገማ ተጠናቋል\n❌ 3. ውድቅ ተደርጓል (ማስተካከያ ይፈልጋል)" 
+      : "📌 Live Progress Timeline:\n\n✅ 1. Receipt Submitted\n✅ 2. Staff Review Completed\n❌ 3. Rejected (Action Required)";
     statusText = lang === 'am' ? "ውድቅ ተደርጓል (Rejected)" : "Rejected";
   }
 
   let msg = lang === 'am' 
-    ? `📋 **የክፍያዎ ሁኔታ ማጠቃለያ**\n\n• **ትምህርት ክፍል:** ${ticket.department}\n• **ሁኔታ:** **${statusText}**\n\n${timeline}\n`
-    : `📋 **Your Payment Status Tracker**\n\n• **Department:** ${ticket.department}\n• **Status:** **${statusText}**\n\n${timeline}\n`;
-  
-  if (ticket.status === 'REJECTED' && ticket.rejection_reason) {
-    msg += lang === 'am' 
-      ? `\n• **ምክንያት:** ${ticket.rejection_reason}\n\nእባክዎን አዲስ ደረሰኝ ለመላክ 'ደረሰኝ አስገባ' የሚለውን ይጫኑ።`
-      : `\n• **Reason:** ${ticket.rejection_reason}\n\nTap 'Submit Payment' in the panel to re-upload.`;
-  }
+    ? `📋 **የክፍያዎ ሁኔታ ማጠቃለያ**\n\n• **ትምህርት ክፍል:** ${ticket.department}\n• **ሁኔታ:** ${statusText}\n\n${timeline}\n` 
+    : `📋 **Your Payment Status Tracker**\n\n• **Department:** ${ticket.department}\n• **Status:** ${statusText}\n\n${timeline}\n`;
 
+  if (ticket.status === 'REJECTED' && ticket.rejection_reason) {
+    msg += lang === 'am' ? `\n• **ምክንያት:** ${ticket.rejection_reason}\n\nእባክዎን አዲስ ደረሰኝ ለመላክ 'ደረሰኝ አስገባ' የሚለውን ይጫኑ።` : `\n• **Reason:** ${ticket.rejection_reason}\n\nTap 'Submit Payment' in the panel to re-upload.`;
+  }
   await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, ticket.status) });
 });
 
@@ -722,17 +632,12 @@ bot.callbackQuery('cmd_history', async (ctx) => {
     'SELECT department, status, rejection_reason, created_at FROM tickets WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20',
     [userId]
   );
-
   if (res.rows.length === 0) {
-    const noHistory = lang === 'am'
-      ? "ℹ️ ምንም የተመዘገበ የክፍያ ታሪክ የለም።"
-      : "ℹ️ No payment submission history found.";
+    const noHistory = lang === 'am' ? "ℹ️ ምንም የተመዘገበ የክፍያ ታሪክ የለም።" : "ℹ️ No payment submission history found.";
     return ctx.reply(noHistory, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
   }
 
-  let text = lang === 'am'
-    ? `📜 **የክፍያ ታሪክዎት (የመጨረሻዎቹ ${res.rows.length}):**\n\n`
-    : `📜 **Your Payment History (Latest ${res.rows.length}):**\n\n`;
+  let text = lang === 'am' ? `📜 **የክፍያ ታሪክዎት (የመጨረሻዎቹ ${res.rows.length}):**\n\n` : `📜 **Your Payment History (Latest ${res.rows.length}):**\n\n`;
 
   for (let idx = 0; idx < res.rows.length; idx++) {
     const r = res.rows[idx];
@@ -755,7 +660,6 @@ bot.callbackQuery('cmd_history', async (ctx) => {
     }
     text += itemText;
   }
-
   if (text.trim().length > 0) {
     await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
   }
@@ -776,11 +680,7 @@ bot.callbackQuery('start_resubmit', async (ctx) => {
   const t = STRINGS[lang];
 
   pendingDepartments.delete(userId);
-
-  await ctx.reply(
-    t.selectPlan,
-    { parse_mode: 'Markdown', reply_markup: getPaymentTypeKeyboard(lang) }
-  );
+  await ctx.reply(t.selectPlan, { parse_mode: 'Markdown', reply_markup: getPaymentTypeKeyboard(lang) });
 });
 
 bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
@@ -791,17 +691,10 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
   const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
-  const fullTaggedDept = isFull 
-    ? `${baseDept} (4-Year Complete)`
-    : `${baseDept} (Regular / Term)`;
-
+  const fullTaggedDept = isFull ? `${baseDept} (4-Year Complete)` : `${baseDept} (Regular / Term)`;
   pendingDepartments.set(userId, fullTaggedDept);
-
   try {
-    await ctx.editMessageText(
-      t.sendReceiptPrompt.replace('{dept}', fullTaggedDept),
-      { parse_mode: 'Markdown' }
-    );
+    await ctx.editMessageText(t.sendReceiptPrompt.replace('{dept}', fullTaggedDept), { parse_mode: 'Markdown' });
   } catch (e) {}
 });
 
@@ -811,10 +704,7 @@ bot.callbackQuery(/^trans_(\d+)_(\d+)$/, async (ctx) => {
   const topicId = Number(ctx.match[2]);
 
   try {
-    await ctx.editMessageText("📂 **Select new department for transfer:**", {
-      parse_mode: 'Markdown',
-      reply_markup: getTransferKeyboard(userId, topicId)
-    });
+    await ctx.editMessageText("📂 Select new department for transfer:", { parse_mode: 'Markdown', reply_markup: getTransferKeyboard(userId, topicId) });
   } catch (e) {}
 });
 
@@ -824,18 +714,12 @@ bot.callbackQuery(/^canceltrans_(\d+)_(\d+)$/, async (ctx) => {
   const topicId = Number(ctx.match[2]);
 
   const ticketRes = await pool.query(
-    'SELECT username, department FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' LIMIT 1',
+    "SELECT username, department FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = 'PENDING' LIMIT 1",
     [userId, topicId]
   );
-
   if (ticketRes.rows.length === 0) {
-    try {
-      return ctx.editMessageText("⚠️ Ticket status changed or non-existent.");
-    } catch (e) {
-      return;
-    }
+    try { return ctx.editMessageText("⚠️ Ticket status changed or non-existent."); } catch (e) { return; }
   }
-
   const { username, department } = ticketRes.rows[0];
 
   const actionKeyboard = new InlineKeyboard()
@@ -873,18 +757,15 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   };
 
   const newDeptTagged = deptMap[deptCode];
-
   const ticketRes = await pool.query(
-    'SELECT topic_id, message_id, ticket_msg_id, username FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' ORDER BY updated_at DESC LIMIT 1',
+    "SELECT topic_id, message_id, ticket_msg_id, username FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = 'PENDING' ORDER BY updated_at DESC LIMIT 1",
     [targetUserId, originTopicId]
   );
 
   if (ticketRes.rows.length === 0) {
     try {
       return ctx.editMessageText("⚠️ This submission is no longer pending or has already been transferred.", { parse_mode: 'Markdown' });
-    } catch (e) {
-      return;
-    }
+    } catch (e) { return; }
   }
 
   const ticket = ticketRes.rows[0];
@@ -893,9 +774,7 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged, staffGroupId);
 
   try {
-    const newForwardRes = await ctx.api.copyMessage(staffGroupId, staffGroupId, Number(ticket.message_id), {
-      message_thread_id: newTopicId
-    });
+    const newForwardRes = await ctx.api.copyMessage(staffGroupId, staffGroupId, Number(ticket.message_id), { message_thread_id: newTopicId });
 
     const actionKeyboard = new InlineKeyboard()
       .text("✅ Approve", `app_${targetUserId}_${newTopicId}`).row()
@@ -904,7 +783,7 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
 
     const newTicketMsg = await ctx.api.sendMessage(
       staffGroupId,
-      `📥 New Submission\n• Student ID: ${targetUserId}\n• Username: @${username}\n• Department: ${newDeptTagged}`,
+      `📥 Transferred Submission\n• Student ID: ${targetUserId}\n• Username: @${username}\n• Department: ${newDeptTagged}`,
       { message_thread_id: newTopicId, reply_markup: actionKeyboard }
     );
 
@@ -915,19 +794,11 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
     `, [newDeptTagged, newTopicId, newForwardRes.message_id, newTicketMsg.message_id, targetUserId]);
 
     if (ticket.message_id) {
-      try {
-        await ctx.api.deleteMessage(staffGroupId, Number(ticket.message_id));
-      } catch (e) {
-        console.error("Could not delete old receipt media message:", e);
-      }
+      try { await ctx.api.deleteMessage(staffGroupId, Number(ticket.message_id)); } catch (e) {}
     }
 
     if (ticket.ticket_msg_id) {
-      try {
-        await ctx.api.deleteMessage(staffGroupId, Number(ticket.ticket_msg_id));
-      } catch (e) {
-        console.error("Could not delete old action panel message:", e);
-      }
+      try { await ctx.api.deleteMessage(staffGroupId, Number(ticket.ticket_msg_id)); } catch (e) {}
     }
 
     try {
@@ -941,12 +812,12 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
     } catch (studentErr) {
       console.error("Could not send transfer notification to student:", studentErr);
     }
-
   } catch (e) {
     console.error("Error transferring message:", e);
   }
 });
 
+// Message Handler
 bot.on('message', async (ctx) => {
   if (ctx.from && ctx.from.is_bot) return;
 
@@ -990,7 +861,7 @@ bot.on('message', async (ctx) => {
       const noDeptMsg = lang === 'am'
         ? "⚠️ **እባክዎን መጀመሪያ ትምህርት ክፍል ይምረጡ**\n\nየመክፈያ ዓይነትዎን እና ትምህርት ክፍልዎን ለመምረጥ ከታች ያለውን ቁልፍ ይጫኑ።"
         : "⚠️ **Please select your department first!**\n\nTap **Submit Payment** below to choose your payment plan and department before sending your receipt photo.";
-      
+
       return ctx.reply(noDeptMsg, {
         parse_mode: 'Markdown',
         reply_markup: getStudentKeyboard(lang, null)
@@ -1050,6 +921,7 @@ bot.on('message', async (ctx) => {
   }
 });
 
+// Staff Approvals & Rejections
 bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = Number(ctx.match[1]);
@@ -1061,7 +933,7 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
     "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING department, username, panel_msg_id",
     [staffName, userId]
   );
-  
+
   if (updateRes.rowCount === 0) {
     return ctx.reply("⚠️ Error: Could not find an active pending ticket record in the database for this user.", { message_thread_id: topicId });
   }
@@ -1072,19 +944,14 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
 
   if (panel_msg_id) {
     try {
-      await ctx.api.editMessageReplyMarkup(userId, Number(panel_msg_id), {
-        reply_markup: getStudentKeyboard(lang, 'APPROVED')
-      });
+      await ctx.api.editMessageReplyMarkup(userId, Number(panel_msg_id), { reply_markup: getStudentKeyboard(lang, 'APPROVED') });
     } catch (err) {
       console.error("Could not edit existing panel markup:", err);
     }
   }
 
   try {
-    await ctx.api.sendMessage(userId, t.approvedMsg, {
-      parse_mode: 'Markdown',
-      reply_markup: getStudentKeyboard(lang, 'APPROVED')
-    });
+    await ctx.api.sendMessage(userId, t.approvedMsg, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, 'APPROVED') });
   } catch (err) {
     console.error("Could not send approval update to student:", err);
   }
@@ -1108,10 +975,7 @@ bot.callbackQuery(/^rej_(\d+)_(\d+)$/, async (ctx) => {
   const topicId = Number(ctx.match[2]);
 
   try {
-    await ctx.editMessageText("❌ **Select rejection reason:**", {
-      parse_mode: 'Markdown',
-      reply_markup: getRejectionReasonKeyboard(userId, topicId)
-    });
+    await ctx.editMessageText("❌ Select rejection reason:", { parse_mode: 'Markdown', reply_markup: getRejectionReasonKeyboard(userId, topicId) });
   } catch (e) {}
 });
 
@@ -1131,9 +995,7 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   const customMessage = reasonObj ? (lang === 'am' ? reasonObj.message_am : reasonObj.message_en) : "Please re-upload a valid payment receipt.";
 
   const updateRes = await pool.query(
-    `UPDATE tickets 
-     SET status = 'REJECTED', rejection_reason = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP 
-     WHERE user_id = $3 AND status = 'PENDING' RETURNING panel_msg_id`,
+    "UPDATE tickets SET status = 'REJECTED', rejection_reason = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP WHERE user_id = $3 AND status = 'PENDING' RETURNING panel_msg_id",
     [reasonText, staffName, userId]
   );
 
@@ -1145,9 +1007,7 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
 
   if (panel_msg_id) {
     try {
-      await ctx.api.editMessageReplyMarkup(userId, Number(panel_msg_id), {
-        reply_markup: getStudentKeyboard(lang, 'REJECTED')
-      });
+      await ctx.api.editMessageReplyMarkup(userId, Number(panel_msg_id), { reply_markup: getStudentKeyboard(lang, 'REJECTED') });
     } catch (err) {
       console.error("Could not edit panel markup on rejection:", err);
     }
@@ -1162,7 +1022,10 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   );
 
   try {
-    await ctx.editMessageText(`❌ Receipt rejected by **${staffName}**.\n**Reason:** ${reasonText}`, { parse_mode: 'Markdown' });
+    await ctx.editMessageText(
+      `❌ Receipt rejected by **${staffName}**\n**Reason:** ${reasonText}`,
+      { parse_mode: 'Markdown' }
+    );
   } catch (e) {}
 
   if (REJECTED_THREAD_ID && staffGroupId) {
@@ -1174,6 +1037,7 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   }
 });
 
+// Daily Cron Job
 cron.schedule('0 8 * * *', async () => {
   try {
     const staffGroupId = await getActiveStaffGroupId();
@@ -1181,7 +1045,7 @@ cron.schedule('0 8 * * *', async () => {
 
     const appSummary = await generateSummaryText('APPROVED');
     const rejSummary = await generateSummaryText('REJECTED');
-    
+
     const pendingRes = await pool.query("SELECT COUNT(*) FROM tickets WHERE status = 'PENDING'");
     const totalPending = pendingRes.rows[0].count;
 
@@ -1216,7 +1080,7 @@ async function main() {
     console.error("Failed to register bot commands:", cmdErr.message);
   }
 
-  const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL; 
+  const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL;
   if (RENDER_EXTERNAL_URL) {
     const webhookUrl = `${RENDER_EXTERNAL_URL}/webhook`;
     await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
