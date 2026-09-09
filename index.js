@@ -470,7 +470,6 @@ async function performBroadcast(ctx, topicId, broadcastMsg) {
   await ctx.reply(`✅ **Broadcast Complete**\n• Delivered: ${successCount}\n• Failed: ${failCount}`, { message_thread_id: topicId });
 }
 
-// Telegram Mini App Launch Command (Placed at top to intercept immediately)
 bot.command('app', async (ctx) => {
   await ctx.reply("🎓 **Welcome to the Student Portal Mini App!**\n\nClick below to launch:", {
     parse_mode: 'Markdown',
@@ -834,7 +833,7 @@ bot.callbackQuery(/^canceltrans_(\d+)_(\d+)$/, async (ctx) => {
   const topicId = Number(ctx.match[2]);
 
   const ticketRes = await pool.query(
-    'SELECT username, department FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' LIMIT 1',
+    'SELECT username, department FROM tickets WHERE user_id = $1 AND topic_id = $2 and status = \'PENDING\' LIMIT 1',
     [userId, topicId]
   );
 
@@ -965,7 +964,20 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
 
 bot.on('message', async (ctx) => {
   if (ctx.from && ctx.from.is_bot) return;
-  if (ctx.message.text && ctx.message.text.startsWith('/')) return; // Ignore slash commands
+
+  // Explicit safety intercept for /app commands
+  if (ctx.message.text && (ctx.message.text.startsWith('/app') || ctx.message.text.startsWith('/app@'))) {
+    return ctx.reply("🎓 **Welcome to the Student Portal Mini App!**\n\nClick below to launch:", {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🚀 Open Student Portal", web_app: { url: "https://tubular-belekoy-52d941.netlify.app" } }]
+        ]
+      }
+    });
+  }
+
+  if (ctx.message.text && ctx.message.text.startsWith('/')) return; // Ignore other slash commands
 
   const staffGroupId = await getActiveStaffGroupId();
   const isStaffGroup = staffGroupId && String(ctx.chat.id) === staffGroupId;
