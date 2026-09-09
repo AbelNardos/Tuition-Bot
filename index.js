@@ -125,7 +125,7 @@ async function setUserLang(userId, lang) {
     if (check.rows.length > 0) {
       await pool.query('UPDATE user_settings SET language = $1 WHERE user_id = $2', [lang, userId]);
     } else {
-      await pool.query('INSERT INTO user_settings (user_id, language) VALUES ($1, $2)', [lang, userId]);
+      await pool.query('INSERT INTO user_settings (user_id, language) VALUES ($1, $2)', [userId, lang]);
     }
   } catch (err) {
     console.error("Error setting user language:", err);
@@ -470,6 +470,18 @@ async function performBroadcast(ctx, topicId, broadcastMsg) {
   await ctx.reply(`✅ **Broadcast Complete**\n• Delivered: ${successCount}\n• Failed: ${failCount}`, { message_thread_id: topicId });
 }
 
+// Telegram Mini App Launch Command (Placed at top to intercept immediately)
+bot.command('app', async (ctx) => {
+  await ctx.reply("🎓 **Welcome to the Student Portal Mini App!**\n\nClick below to launch:", {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "🚀 Open Student Portal", web_app: { url: "https://tubular-belekoy-52d941.netlify.app" } }]
+      ]
+    }
+  });
+});
+
 bot.command('bind', async (ctx) => {
   if (ctx.chat.type === 'private') {
     return ctx.reply("⚠️ This command must be executed inside a supergroup with topics/threads enabled.");
@@ -529,18 +541,6 @@ bot.command(['start', 'panel'], async (ctx) => {
       { parse_mode: 'Markdown', reply_markup: langKeyboard }
     );
   }
-});
-
-// Telegram Mini App Launch Command
-bot.command('app', async (ctx) => {
-  await ctx.reply("🎓 **Welcome to the Student Portal Mini App!**\n\nClick below to launch:", {
-    parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "🚀 Open Student Portal", web_app: { url: "https://tubular-belekoy-52d941.netlify.app" } }]
-      ]
-    }
-  });
 });
 
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
