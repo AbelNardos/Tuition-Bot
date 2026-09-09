@@ -42,7 +42,6 @@ const pool = new Pool({
 });
 
 async function initDB() {
-  // Drop the old primary key constraint causing the crash if it exists
   try {
     await pool.query(`
       ALTER TABLE department_topics DROP CONSTRAINT IF EXISTS department_topics_pkey;
@@ -319,7 +318,6 @@ async function generateApprovalPDF(userId, username, department, staffName) {
 
 bot.catch((err) => console.error('Error in bot framework:', err));
 
-// SAFE TOPIC RETRIEVAL / CREATION (No ON CONFLICT constraints used)
 async function getOrCreateDepartmentTopic(ctx, departmentName, targetGroupId) {
   const baseDepartment = departmentName.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
 
@@ -531,6 +529,18 @@ bot.command(['start', 'panel'], async (ctx) => {
       { parse_mode: 'Markdown', reply_markup: langKeyboard }
     );
   }
+});
+
+// Telegram Mini App Launch Command
+bot.command('app', async (ctx) => {
+  await ctx.reply("🎓 **Welcome to the Student Portal Mini App!**\n\nClick below to launch:", {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "🚀 Open Student Portal", web_app: { url: "https://tubular-belekoy-52d941.netlify.app" } }]
+      ]
+    }
+  });
 });
 
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
@@ -863,7 +873,6 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
     return ctx.reply("⚠️ Staff group configuration missing. Run /bind in your staff group.");
   }
 
-  // Fetch current ticket to preserve payment plan tag
   const ticketRes = await pool.query(
     'SELECT topic_id, message_id, ticket_msg_id, username, department FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' ORDER BY updated_at DESC LIMIT 1',
     [targetUserId, originTopicId]
@@ -881,7 +890,6 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   const username = ticket.username || 'Unknown';
   const currentDept = ticket.department || '';
 
-  // Preserve original payment plan tag
   let planSuffix = "(Regular / Term)";
   if (currentDept.includes("(4-Year Complete)")) {
     planSuffix = "(4-Year Complete)";
@@ -1217,6 +1225,7 @@ async function main() {
 
     await bot.api.setMyCommands([
       { command: 'start', description: 'Start payment receipt submission' },
+      { command: 'app', description: 'Open Student Portal Mini App' },
       { command: 'panel', description: 'Open interactive action panel' },
       { command: 'bind', description: 'Bind current group as staff panel (Admins only)' }
     ]);
