@@ -965,6 +965,7 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
 
 bot.on('message', async (ctx) => {
   if (ctx.from && ctx.from.is_bot) return;
+  if (ctx.message.text && ctx.message.text.startsWith('/')) return; // Ignore commands like /app, /start, etc.
 
   const staffGroupId = await getActiveStaffGroupId();
   const isStaffGroup = staffGroupId && String(ctx.chat.id) === staffGroupId;
