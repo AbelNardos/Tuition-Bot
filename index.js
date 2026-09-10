@@ -913,41 +913,42 @@ bot.callbackQuery(/^roster_(.+)$/, async (ctx) => {
   if (res.rows.length === 0) {
     const emptyMsg = isAll 
       ? "ℹ️ No approved students registered yet."
-      : `ℹ️ No approved students found in **${cleanDept}**.`;
-    return ctx.editMessageText(emptyMsg, { parse_mode: 'Markdown' });
+      : `ℹ️ No approved students found in <b>${cleanDept}</b>.`;
+    return ctx.editMessageText(emptyMsg, { parse_mode: 'HTML' });
   }
 
   const headerTitle = isAll ? "ALL DEPARTMENTS" : cleanDept.toUpperCase();
-  let text = `🎓 **APPROVED ROSTER — ${headerTitle}** (${res.rows.length} Total)\n\n`;
+  let text = `🎓 <b>APPROVED ROSTER — ${headerTitle}</b> (${res.rows.length} Total)\n\n`;
   let currentGroupDept = "";
 
   for (let idx = 0; idx < res.rows.length; idx++) {
     const r = res.rows[idx];
-    const uname = r.username ? `@${r.username}` : `[No @username]`;
+    const rawUname = r.username ? `@${r.username}` : `[No @username]`;
+    // Escape HTML special characters
+    const uname = rawUname.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const dateStr = new Date(r.updated_at).toLocaleDateString();
-    const staff = r.processed_by ? ` (Staff: ${r.processed_by})` : '';
+    const rawStaff = r.processed_by ? ` (Staff: ${r.processed_by})` : '';
+    const staff = rawStaff.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
     let itemText = "";
     if (isAll && r.department !== currentGroupDept) {
       currentGroupDept = r.department;
-      itemText += `\n📁 **${currentGroupDept}**\n`;
+      itemText += `\n📁 <b>${currentGroupDept.replace(/&/g, '&amp;')}</b>\n`;
     }
 
-    itemText += `${idx + 1}. **${uname}** (ID: \`${r.user_id}\`)\n   • Approved: ${dateStr}${staff}\n`;
+    itemText += `${idx + 1}. <b>${uname}</b> (ID: <code>${r.user_id}</code>)\n   • Approved: ${dateStr}${staff}\n`;
 
     if ((text + itemText).length > 3800) {
-      await ctx.reply(text, { parse_mode: 'Markdown' });
+      await ctx.reply(text, { parse_mode: 'HTML' });
       text = "";
     }
     text += itemText;
   }
 
   if (text.trim().length > 0) {
-    await ctx.reply(text, { parse_mode: 'Markdown' });
+    await ctx.reply(text, { parse_mode: 'HTML' });
   }
 });
-
-bot.callbackQuery(/^notify_mod_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   if (!(await isStaff(ctx))) return;
 
