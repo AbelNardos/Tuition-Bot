@@ -25,7 +25,7 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception thrown:', err);
 });
 
-// Self keep-alive ping
+// Self keep-alive ping for external web service
 setInterval(() => {
   const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
   if (RENDER_URL) {
@@ -324,7 +324,8 @@ function getStaffKeyboard() {
     .text('📊 Statistics', 'cmd_stats').row()
     .text('📄 Export CSV', 'cmd_export')
     .text('📢 Broadcast', 'cmd_broadcast').row()
-    .text('📚 Upload Course Module', 'cmd_upload_module');
+    .text('📚 Upload Course Module', 'cmd_upload_module')
+    .text('🗑 Delete Module', 'cmd_delete_module');
 }
 
 function getModuleDepartmentKeyboard() {
@@ -758,6 +759,78 @@ bot.callbackQuery(/^chgdept_(\d+)_(mkt|biz|acc|agri|ed|log|cancel)$/, async (ctx
   }
 });
 
+// INTERACTIVE /deletemodule MANAGER
+bot.command(['deletemodule', 'delmod'], async (ctx) => {
+  const authorized = await isStaff(ctx);
+  if (!authorized) return;
+
+  const topicId = ctx.message.message_thread_id;
+
+  const kb = new InlineKeyboard()
+    .text("📈 Marketing", "delmoddept_Marketing Management")
+    .text("💼 Business", "delmoddept_Business Management").row()
+    .text("📊 Accounting & Finance", "delmoddept_Accounting and finance").row()
+    .text("🌾 Agribusiness & VCM", "delmoddept_Agribusiness and Value chain management").row()
+    .text("📚 Ed. Planning & Mgmt", "delmoddept_Educational planning and management").row()
+    .text("🚚 Logistics & SCM", "delmoddept_Logistics and Supply chain management").row()
+    .text("🔙 Cancel", "delmoddept_cancel");
+
+  await ctx.reply(
+    "🗑 **Delete Course Module**\n\nSelect the academic department to view and remove modules:",
+    { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: kb }
+  );
+});
+
+bot.callbackQuery(/^delmoddept_(.+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const dept = ctx.match[1];
+
+  if (dept === 'cancel') {
+    return ctx.editMessageText("❌ Module deletion cancelled.");
+  }
+
+  const res = await pool.query(
+    "SELECT id, title, file_name FROM department_modules WHERE department ILIKE $1 ORDER BY id ASC",
+    [`%${dept}%`]
+  );
+
+  if (res.rows.length === 0) {
+    return ctx.editMessageText(`ℹ️ No modules currently found for **${dept}**.`);
+  }
+
+  const kb = new InlineKeyboard();
+  res.rows.forEach((m) => {
+    kb.text(`🗑 ${m.title}`, `confirm_delmod_${m.id}`).row();
+  });
+  kb.text("🔙 Cancel", "delmoddept_cancel");
+
+  await ctx.editMessageText(
+    `🗑 **Modules for ${dept}**\n\nTap any module below to permanently remove student access:`,
+    { parse_mode: 'Markdown', reply_markup: kb }
+  );
+});
+
+bot.callbackQuery(/^confirm_delmod_(\d+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const moduleId = Number(ctx.match[1]);
+
+  const res = await pool.query(
+    "DELETE FROM department_modules WHERE id = $1 RETURNING title, department",
+    [moduleId]
+  );
+
+  if (res.rowCount === 0) {
+    return ctx.editMessageText("⚠️ Module was already deleted or not found.");
+  }
+
+  const { title, department } = res.rows[0];
+
+  await ctx.editMessageText(
+    `✅ **Module Deleted Successfully!**\n\n• **Title:** ${title}\n• **Department:** ${department}\n\n_This module is no longer accessible or downloadable by any student._`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const lang = ctx.match[1];
@@ -825,6 +898,26 @@ bot.callbackQuery('cmd_upload_module', async (ctx) => {
       parse_mode: 'Markdown',
       reply_markup: getModuleDepartmentKeyboard()
     }
+  );
+});
+
+bot.callbackQuery('cmd_delete_module', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const authorized = await isStaff(ctx);
+  if (!authorized) return;
+
+  const kb = new InlineKeyboard()
+    .text("📈 Marketing", "delmoddept_Marketing Management")
+    .text("💼 Business", "delmoddept_Business Management").row()
+    .text("📊 Accounting & Finance", "delmoddept_Accounting and finance").row()
+    .text("🌾 Agribusiness & VCM", "delmoddept_Agribusiness and Value chain management").row()
+    .text("📚 Ed. Planning & Mgmt", "delmoddept_Educational planning and management").row()
+    .text("🚚 Logistics & SCM", "delmoddept_Logistics and Supply chain management").row()
+    .text("🔙 Cancel", "delmoddept_cancel");
+
+  await ctx.reply(
+    "🗑 **Delete Course Module**\n\nSelect the academic department to view and remove modules:",
+    { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'Markdown', reply_markup: kb }
   );
 });
 
@@ -1685,7 +1778,8 @@ async function main() {
       { command: 'start', description: 'Start payment receipt submission' },
       { command: 'panel', description: 'Open interactive action panel' },
       { command: 'bind', description: 'Bind current group as staff panel (Admins only)' },
-      { command: 'changedept', description: 'Change approved student department (Staff only)' }
+      { command: 'changedept', description: 'Change approved student department (Staff only)' },
+      { command: 'deletemodule', description: 'Delete course module from database (Staff only)' }
     ]);
   } catch (cmdErr) {
     console.error("Failed to register bot commands:", cmdErr.message);
