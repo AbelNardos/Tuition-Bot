@@ -25,7 +25,6 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception thrown:', err);
 });
 
-// Keep-alive ping for external web service
 setInterval(() => {
   const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
   if (RENDER_URL) {
@@ -79,7 +78,8 @@ async function initDB() {
     CREATE TABLE IF NOT EXISTS user_settings (
       user_id BIGINT PRIMARY KEY,
       language TEXT DEFAULT 'en',
-      pending_department TEXT
+      pending_department TEXT,
+      pending_module_dept TEXT
     );
 
     CREATE TABLE IF NOT EXISTS department_topics (
@@ -101,21 +101,19 @@ async function initDB() {
 
   try {
     await pool.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS panel_msg_id BIGINT;`);
-  } catch (err) {
-    console.error("Migration check error (panel_msg_id):", err);
-  }
+  } catch (err) {}
 
   try {
     await pool.query(`ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS pending_department TEXT;`);
-  } catch (err) {
-    console.error("Migration check error (pending_department):", err);
-  }
+  } catch (err) {}
+
+  try {
+    await pool.query(`ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS pending_module_dept TEXT;`);
+  } catch (err) {}
 
   try {
     await pool.query(`ALTER TABLE group_settings ADD COLUMN IF NOT EXISTS modules_topic_id BIGINT;`);
-  } catch (err) {
-    console.error("Migration check error (modules_topic_id):", err);
-  }
+  } catch (err) {}
 }
 
 async function getActiveStaffGroupId() {
@@ -186,6 +184,39 @@ async function clearPendingDepartment(userId) {
   }
 }
 
+async function getStaffPendingModuleDept(userId) {
+  try {
+    const res = await pool.query('SELECT pending_module_dept FROM user_settings WHERE user_id = $1', [userId]);
+    if (res.rows.length > 0) {
+      return res.rows[0].pending_module_dept;
+    }
+  } catch (err) {
+    console.error("Error fetching staff pending module dept:", err);
+  }
+  return null;
+}
+
+async function setStaffPendingModuleDept(userId, dept) {
+  try {
+    await pool.query(`
+      INSERT INTO user_settings (user_id, pending_module_dept) 
+      VALUES ($1, $2)
+      ON CONFLICT (user_id) 
+      DO UPDATE SET pending_module_dept = $2
+    `, [userId, dept]);
+  } catch (err) {
+    console.error("Error setting staff pending module dept:", err);
+  }
+}
+
+async function clearStaffPendingModuleDept(userId) {
+  try {
+    await pool.query('UPDATE user_settings SET pending_module_dept = NULL WHERE user_id = $1', [userId]);
+  } catch (err) {
+    console.error("Error clearing staff pending module dept:", err);
+  }
+}
+
 async function isStaff(ctx) {
   try {
     const staffGroupId = await getActiveStaffGroupId();
@@ -209,15 +240,6 @@ bot.use(async (ctx, next) => {
   }
   await next();
 });
-
-const DEPT_MAP = {
-  mkt: "Marketing Management",
-  biz: "Business Management",
-  acc: "Accounting and finance",
-  agri: "Agribusiness and Value chain management",
-  ed: "Educational planning and management",
-  log: "Logistics and Supply chain management"
-};
 
 const STRINGS = {
   en: {
@@ -305,19 +327,19 @@ function getStaffKeyboard() {
   return new InlineKeyboard()
     .text('🔍 Search Record', 'cmd_lookfor')
     .text('📊 Statistics', 'cmd_stats').row()
-    .text('📚 Upload Module', 'cmd_staff_upload_mod').row()
     .text('📄 Export CSV', 'cmd_export')
-    .text('📢 Broadcast', 'cmd_broadcast');
+    .text('📢 Broadcast', 'cmd_broadcast').row()
+    .text('📚 Upload Course Module', 'cmd_upload_module');
 }
 
-function getStaffModuleDeptKeyboard() {
+function getModuleDepartmentKeyboard() {
   return new InlineKeyboard()
-    .text("📈 Marketing", "moddept_mkt")
-    .text("💼 Business", "moddept_biz").row()
-    .text("📊 Accounting & Finance", "moddept_acc").row()
-    .text("🌾 Agribusiness & VCM", "moddept_agri").row()
-    .text("📚 Ed. Planning & Mgmt", "moddept_ed").row()
-    .text("🚚 Logistics & SCM", "moddept_log").row()
+    .text("📈 Marketing", "moddept_Marketing Management")
+    .text("💼 Business", "moddept_Business Management").row()
+    .text("📊 Accounting & Finance", "moddept_Accounting and finance").row()
+    .text("🌾 Agribusiness & VCM", "moddept_Agribusiness and Value chain management").row()
+    .text("📚 Ed. Planning & Mgmt", "moddept_Educational planning and management").row()
+    .text("🚚 Logistics & SCM", "moddept_Logistics and Supply chain management").row()
     .text("🔙 Cancel", "moddept_cancel");
 }
 
@@ -340,7 +362,7 @@ function getStudentKeyboard(lang = 'en', status = null) {
     if (status === 'PENDING') {
       kb.text('⏳ Under Review', 'cmd_pending_info');
     } else if (status === 'APPROVED') {
-      kb.text('⬇️ Download Receipt', 'cmd_download_pdf');
+      kb.text('⬇️ Download Slip', 'cmd_download_pdf');
     } else {
       kb.text('📤 Submit Payment', 'cmd_submit');
     }
@@ -627,15 +649,6 @@ bot.command(['start', 'panel'], async (ctx) => {
     const userId = ctx.from.id;
     await clearPendingDepartment(userId);
 
-    // If a staff member runs /start or /panel in DM, show staff tools option
-    const userIsStaff = await isStaff(ctx);
-    if (userIsStaff) {
-      return ctx.reply(
-        "⚙️ **RENAISSANCE GLOBAL — STAFF ACTION PANEL**\n\nSelect an action below:",
-        { parse_mode: 'Markdown', reply_markup: getStaffKeyboard() }
-      );
-    }
-
     const langKeyboard = new InlineKeyboard()
       .text("🇬🇧 English", "lang_en")
       .text("🇪🇹 አማርኛ", "lang_am");
@@ -645,38 +658,6 @@ bot.command(['start', 'panel'], async (ctx) => {
       { parse_mode: 'Markdown', reply_markup: langKeyboard }
     );
   }
-});
-
-// STAFF PANEL: UPLOAD MODULE FLOW (BUTTON-BASED)
-bot.callbackQuery('cmd_staff_upload_mod', async (ctx) => {
-  try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const authorized = await isStaff(ctx);
-  if (!authorized) return;
-
-  await ctx.reply(
-    "📚 **Upload Course Module**\n\nPlease select the department this module belongs to:",
-    { parse_mode: 'Markdown', reply_markup: getStaffModuleDeptKeyboard() }
-  );
-});
-
-bot.callbackQuery(/^moddept_(mkt|biz|acc|agri|ed|log)$/, async (ctx) => {
-  try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const deptCode = ctx.match[1];
-  const fullDept = DEPT_MAP[deptCode];
-  const staffId = ctx.from.id;
-
-  await setPendingDepartment(staffId, `UPLOAD_MOD:${fullDept}`);
-
-  await ctx.reply(
-    `✅ Selected Department: **${fullDept}**\n\nNow, simply send or forward the **PDF document** for this module.`,
-    { parse_mode: 'Markdown' }
-  );
-});
-
-bot.callbackQuery('moddept_cancel', async (ctx) => {
-  try { await ctx.answerCallbackQuery(); } catch (e) {}
-  await clearPendingDepartment(ctx.from.id);
-  await ctx.editMessageText("❌ Module upload cancelled.");
 });
 
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
@@ -734,6 +715,36 @@ bot.callbackQuery('cmd_broadcast', async (ctx) => {
   );
 });
 
+bot.callbackQuery('cmd_upload_module', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const authorized = await isStaff(ctx);
+  if (!authorized) return;
+
+  await ctx.reply(
+    "📚 **Upload Course Module**\n\nPlease select the department for this module:",
+    {
+      message_thread_id: ctx.callbackQuery.message.message_thread_id,
+      parse_mode: 'Markdown',
+      reply_markup: getModuleDepartmentKeyboard()
+    }
+  );
+});
+
+bot.callbackQuery(/^moddept_(.+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const dept = ctx.match[1];
+
+  if (dept === 'cancel') {
+    await clearStaffPendingModuleDept(ctx.from.id);
+    return ctx.editMessageText("❌ Module upload cancelled.");
+  }
+
+  await setStaffPendingModuleDept(ctx.from.id, dept);
+
+  await ctx.editMessageText(
+    `✅ Selected Department:\n${dept}\n\nNow, simply send or forward the PDF document for this module.`
+  );
+});
 bot.callbackQuery('cmd_submit', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = ctx.from.id;
@@ -1023,20 +1034,20 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
   } catch (e) {}
 });
 
-// STAFF MODULE COMMAND BACKUP (SHORT-CODES & AUTO-VAULT)
+// COMMAND-BASED UPLOAD (/module Marketing Management | Title)
 bot.command(['module', 'uploadmodule'], async (ctx) => {
   const authorized = await isStaff(ctx);
   if (!authorized) return;
 
   const staffGroupId = await getActiveStaffGroupId();
   if (!staffGroupId) {
-    return ctx.reply("⚠️ Staff group configuration missing. Please run /bind inside your staff group first.");
+    return ctx.reply("⚠️ Staff group configuration missing. Run /bind inside your staff group first.");
   }
 
   const doc = ctx.message.document || (ctx.message.reply_to_message && ctx.message.reply_to_message.document);
   if (!doc) {
     return ctx.reply(
-      "⚠️ **Please attach or reply to a PDF document.**\n\n*Format:*\n`/module <Department> | <Module Title>`\n\n*Example:*\n`/module mkt | Consumer Behavior 101`",
+      "⚠️ **Please attach or reply to a PDF document.**\n\n*Format:*\n`/module <Department> | <Module Title>`\n\n*Example:*\n`/module Marketing Management | Consumer Behavior 101`",
       { parse_mode: 'Markdown' }
     );
   }
@@ -1047,20 +1058,18 @@ bot.command(['module', 'uploadmodule'], async (ctx) => {
 
   if (parts.length < 2 || !parts[0] || !parts[1]) {
     return ctx.reply(
-      "⚠️ **Invalid Format!**\nPlease separate the department and title with a pipe (`|`).\n\n*Example:* `/module acc | Financial Accounting I`",
+      "⚠️ **Invalid Format!**\nPlease separate the department and title with a pipe (`|`).\n\n*Example:* `/module Accounting and finance | Financial Accounting I`",
       { parse_mode: 'Markdown' }
     );
   }
 
-  let deptInput = parts[0].toLowerCase();
-  const targetDept = DEPT_MAP[deptInput] || parts[0];
-  const title = parts[1];
+  const [dept, title] = parts;
   const staffUploader = ctx.from.username ? `@${ctx.from.username}` : `${ctx.from.first_name || 'Staff'}`;
 
   try {
     let vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
 
-    const vaultCaption = `📚 **COURSE MODULE ARCHIVE**\n\n• **Department:** ${targetDept}\n• **Title:** ${title}\n• **Uploaded by:** ${staffUploader}\n• **File:** \`${doc.file_name || 'document.pdf'}\``;
+    const vaultCaption = `📚 **COURSE MODULE ARCHIVE**\n\n• **Department:** ${dept}\n• **Title:** ${title}\n• **Uploaded by:** ${staffUploader}\n• **File:** \`${doc.file_name || 'document.pdf'}\``;
 
     let vaultMsg;
     try {
@@ -1086,7 +1095,7 @@ bot.command(['module', 'uploadmodule'], async (ctx) => {
     const savedFileId = vaultMsg.document.file_id;
     await pool.query(
       "INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4)",
-      [targetDept, title, savedFileId, doc.file_name || `${title}.pdf`]
+      [dept, title, savedFileId, doc.file_name || `${title}.pdf`]
     );
 
     const isInsideVault = String(ctx.chat.id) === staffGroupId && ctx.message.message_thread_id === vaultTopicId;
@@ -1102,11 +1111,11 @@ bot.command(['module', 'uploadmodule'], async (ctx) => {
     }
 
     if (ctx.chat.type === 'private') {
-      await ctx.reply(`✅ **Successfully Stashed in Vault!**\n\n• **Department:** ${targetDept}\n• **Title:** ${title}\n• Archived into the staff group modules vault and live for approved students!`, { parse_mode: 'Markdown' });
+      await ctx.reply(`✅ **Successfully Stashed in Vault!**\n\n• **Department:** ${dept}\n• **Title:** ${title}\n• Archived into the staff group modules vault and live for approved students!`, { parse_mode: 'Markdown' });
     } else {
       await ctx.api.sendMessage(
         staffGroupId,
-        `✅ Stashed new module for **${targetDept}** into Vault.`,
+        `✅ Stashed new module for **${dept}** into Vault.`,
         { message_thread_id: vaultTopicId, parse_mode: 'Markdown' }
       );
     }
@@ -1197,7 +1206,16 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
     planSuffix = "(4-Year Complete)";
   }
 
-  const newDeptTagged = `${DEPT_MAP[deptCode]} ${planSuffix}`;
+  const baseDeptMap = {
+    mkt: "Marketing Management",
+    biz: "Business Management",
+    agri: "Agribusiness and Value chain management",
+    ed: "Educational planning and management",
+    acc: "Accounting and finance",
+    log: "Logistics and Supply chain management"
+  };
+
+  const newDeptTagged = `${baseDeptMap[deptCode]} ${planSuffix}`;
   const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged, staffGroupId);
 
   try {
@@ -1255,6 +1273,7 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   }
 });
 
+// MAIN MESSAGE HANDLER (CATCHES BOTH RECEIPTS AND INTERACTIVE MODULE UPLOADS)
 bot.on('message', async (ctx) => {
   if (ctx.from && ctx.from.is_bot) return;
   if (ctx.message.text && ctx.message.text.startsWith('/')) return;
@@ -1263,9 +1282,54 @@ bot.on('message', async (ctx) => {
   const isStaffGroup = staffGroupId && String(ctx.chat.id) === staffGroupId;
   const isPrivate = ctx.chat.type === 'private';
   const topicId = ctx.message.message_thread_id;
-  const userId = ctx.from.id;
 
-  // 1. STAFF SUPERGROUP REPLIES
+  // 1. CATCH INTERACTIVE STAFF MODULE UPLOAD (FROM PROMPT SCREENSHOT)
+  let staffDept = await getStaffPendingModuleDept(ctx.from.id);
+  
+  if (!staffDept && ctx.message.reply_to_message && ctx.message.reply_to_message.text) {
+    const match = ctx.message.reply_to_message.text.match(/Selected Department:\s*([^\n]+)/);
+    if (match) staffDept = match[1].trim();
+  }
+
+  if (isStaffGroup && staffDept && ctx.message.document) {
+    const doc = ctx.message.document;
+    const moduleTitle = doc.file_name ? doc.file_name.replace(/\.pdf$/i, '') : 'Course Module';
+    const staffUploader = ctx.from.username ? `@${ctx.from.username}` : `${ctx.from.first_name || 'Staff'}`;
+
+    try {
+      const vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
+
+      const vaultCaption = `📚 **COURSE MODULE ARCHIVE**\n\n• **Department:** ${staffDept}\n• **Title:** ${moduleTitle}\n• **Uploaded by:** ${staffUploader}\n• **File:** \`${doc.file_name || 'document.pdf'}\``;
+
+      const vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, {
+        message_thread_id: vaultTopicId,
+        caption: vaultCaption,
+        parse_mode: 'Markdown'
+      });
+
+      await pool.query(
+        "INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4)",
+        [staffDept, moduleTitle, vaultMsg.document.file_id, doc.file_name || `${moduleTitle}.pdf`]
+      );
+
+      await clearStaffPendingModuleDept(ctx.from.id);
+
+      // Auto-delete loose PDF from this topic so the group stays clean
+      try {
+        await ctx.deleteMessage();
+      } catch (delErr) {}
+
+      return ctx.reply(
+        `✅ **Module Stashed Successfully!**\n\n• **Department:** ${staffDept}\n• **Title:** ${moduleTitle}\n• Saved in **📚 [Course Modules Vault]** and live for students!`,
+        { message_thread_id: topicId, parse_mode: 'Markdown' }
+      );
+    } catch (err) {
+      console.error("Error processing staff module upload:", err);
+      return ctx.reply(`❌ Failed to upload module: ${err.message}`, { message_thread_id: topicId });
+    }
+  }
+
+  // 2. REPLIES INSIDE STAFF GROUP (SEARCH OR BROADCAST)
   if (isStaffGroup && ctx.message.reply_to_message) {
     const originalMsg = ctx.message.reply_to_message;
 
@@ -1282,44 +1346,9 @@ bot.on('message', async (ctx) => {
     }
   }
 
-  // 2. CHECK IF STAFF IS UPLOADING A MODULE VIA THE BUTTON WIZARD
-  if (isPrivate && ctx.message.document) {
-    const pendingState = await getPendingDepartment(userId);
-    if (pendingState && pendingState.startsWith('UPLOAD_MOD:')) {
-      const targetDept = pendingState.replace('UPLOAD_MOD:', '');
-      const doc = ctx.message.document;
-      const staffUploader = ctx.from.username ? `@${ctx.from.username}` : `${ctx.from.first_name || 'Staff'}`;
-      const cleanTitle = (ctx.message.caption || doc.file_name || 'Course Module').replace(/\.[^/.]+$/, "").replace(/_/g, " ");
-
-      if (!staffGroupId) {
-        return ctx.reply("⚠️ Staff group configuration missing. Please run /bind in your staff group first.");
-      }
-
-      const vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
-      const vaultCaption = `📚 **COURSE MODULE ARCHIVE**\n\n• **Department:** ${targetDept}\n• **Title:** ${cleanTitle}\n• **Uploaded by:** ${staffUploader}\n• **File:** \`${doc.file_name || 'document.pdf'}\``;
-
-      const vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, {
-        message_thread_id: vaultTopicId,
-        caption: vaultCaption,
-        parse_mode: 'Markdown'
-      });
-
-      await pool.query(
-        "INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4)",
-        [targetDept, cleanTitle, vaultMsg.document.file_id, doc.file_name || `${cleanTitle}.pdf`]
-      );
-
-      await clearPendingDepartment(userId);
-
-      return ctx.reply(
-        `✅ **Module Successfully Uploaded!**\n\n• **Department:** ${targetDept}\n• **Title:** ${cleanTitle}\n• It is now archived in the staff vault and available to students!`,
-        { parse_mode: 'Markdown' }
-      );
-    }
-  }
-
   // 3. STUDENT RECEIPT SUBMISSION
   if (isPrivate) {
+    const userId = ctx.from.id;
     const lang = await getUserLang(userId);
     const t = STRINGS[lang];
 
@@ -1576,4 +1605,3 @@ async function main() {
 }
 
 main();
-
