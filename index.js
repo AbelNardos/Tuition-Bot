@@ -42,14 +42,15 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 async function initDB() {
   try {
-    await pool.query(`
-      ALTER TABLE department_topics DROP CONSTRAINT IF EXISTS department_topics_pkey;
-    `);
-  } catch (err) {
-    console.error("Error dropping old constraint:", err);
-  }
+    await pool.query(`ALTER TABLE department_topics DROP CONSTRAINT IF EXISTS department_topics_pkey;`);
+  } catch (err) {}
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS group_settings (
@@ -128,24 +129,16 @@ async function initDB() {
 async function getActiveStaffGroupId() {
   try {
     const res = await pool.query('SELECT group_id FROM group_settings WHERE is_active = TRUE ORDER BY updated_at DESC LIMIT 1');
-    if (res.rows.length > 0) {
-      return res.rows[0].group_id;
-    }
-  } catch (err) {
-    console.error("Error fetching active staff group ID:", err);
-  }
+    if (res.rows.length > 0) return res.rows[0].group_id;
+  } catch (err) {}
   return String(process.env.STAFF_GROUP_ID || '').trim();
 }
 
 async function getUserLang(userId) {
   try {
     const res = await pool.query('SELECT language FROM user_settings WHERE user_id = $1', [userId]);
-    if (res.rows.length > 0 && res.rows[0].language) {
-      return res.rows[0].language;
-    }
-  } catch (err) {
-    console.error("Error fetching user language:", err);
-  }
+    if (res.rows.length > 0 && res.rows[0].language) return res.rows[0].language;
+  } catch (err) {}
   return 'en';
 }
 
@@ -155,20 +148,14 @@ async function setUserLang(userId, lang) {
       INSERT INTO user_settings (user_id, language) VALUES ($1, $2)
       ON CONFLICT (user_id) DO UPDATE SET language = $2
     `, [userId, lang]);
-  } catch (err) {
-    console.error("Error setting user language:", err);
-  }
+  } catch (err) {}
 }
 
 async function getPendingDepartment(userId) {
   try {
     const res = await pool.query('SELECT pending_department FROM user_settings WHERE user_id = $1', [userId]);
-    if (res.rows.length > 0) {
-      return res.rows[0].pending_department;
-    }
-  } catch (err) {
-    console.error("Error fetching pending department:", err);
-  }
+    if (res.rows.length > 0) return res.rows[0].pending_department;
+  } catch (err) {}
   return null;
 }
 
@@ -180,25 +167,19 @@ async function setPendingDepartment(userId, dept) {
       ON CONFLICT (user_id) 
       DO UPDATE SET pending_department = $2
     `, [userId, dept]);
-  } catch (err) {
-    console.error("Error setting pending department:", err);
-  }
+  } catch (err) {}
 }
 
 async function clearPendingDepartment(userId) {
   try {
     await pool.query('UPDATE user_settings SET pending_department = NULL WHERE user_id = $1', [userId]);
-  } catch (err) {
-    console.error("Error clearing pending department:", err);
-  }
+  } catch (err) {}
 }
 
 async function getStaffPendingModuleDept(userId) {
   try {
     const res = await pool.query('SELECT pending_module_dept FROM user_settings WHERE user_id = $1', [userId]);
-    if (res.rows.length > 0) {
-      return res.rows[0].pending_module_dept;
-    }
+    if (res.rows.length > 0) return res.rows[0].pending_module_dept;
   } catch (err) {}
   return null;
 }
@@ -349,6 +330,18 @@ function getModuleDepartmentKeyboard() {
     .text("🔙 Cancel", "moddept_cancel");
 }
 
+function getApprovedRosterKeyboard() {
+  return new InlineKeyboard()
+    .text("🌐 Every Student (All Departments)", "roster_all").row()
+    .text("📈 Marketing", "roster_Marketing Management")
+    .text("💼 Business", "roster_Business Management").row()
+    .text("📊 Accounting & Finance", "roster_Accounting and finance").row()
+    .text("🌾 Agribusiness & VCM", "roster_Agribusiness and Value chain management").row()
+    .text("📚 Ed. Planning & Mgmt", "roster_Educational planning and management").row()
+    .text("🚚 Logistics & SCM", "roster_Logistics and Supply chain management").row()
+    .text("🔙 Cancel", "roster_cancel");
+}
+
 function getStudentKeyboard(lang = 'en', status = null) {
   const kb = new InlineKeyboard();
 
@@ -431,7 +424,6 @@ async function generateApprovalPDF(userId, username, department, staffName) {
 }
 
 bot.catch((err) => console.error('Error in bot framework:', err));
-
 async function getOrCreateDepartmentTopic(ctx, departmentName, targetGroupId) {
   const baseDepartment = departmentName.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
 
@@ -841,19 +833,7 @@ bot.callbackQuery(/^confirm_delmod_(\d+)$/, async (ctx) => {
   );
 });
 
-// APPROVED STUDENTS DIRECTORY ROSTER (WITH ALL DEPARTMENTS OPTION)
-function getApprovedRosterKeyboard() {
-  return new InlineKeyboard()
-    .text("🌐 Every Student (All Departments)", "roster_all").row()
-    .text("📈 Marketing", "roster_Marketing Management")
-    .text("💼 Business", "roster_Business Management").row()
-    .text("📊 Accounting & Finance", "roster_Accounting and finance").row()
-    .text("🌾 Agribusiness & VCM", "roster_Agribusiness and Value chain management").row()
-    .text("📚 Ed. Planning & Mgmt", "roster_Educational planning and management").row()
-    .text("🚚 Logistics & SCM", "roster_Logistics and Supply chain management").row()
-    .text("🔙 Cancel", "roster_cancel");
-}
-
+// APPROVED STUDENTS DIRECTORY ROSTER (WITH HTML PARSE MODE FIX)
 bot.command(['approved', 'students'], async (ctx) => {
   const authorized = await isStaff(ctx);
   if (!authorized) return;
@@ -913,27 +893,25 @@ bot.callbackQuery(/^roster_(.+)$/, async (ctx) => {
   if (res.rows.length === 0) {
     const emptyMsg = isAll 
       ? "ℹ️ No approved students registered yet."
-      : `ℹ️ No approved students found in <b>${cleanDept}</b>.`;
+      : `ℹ️ No approved students found in <b>${escapeHtml(cleanDept)}</b>.`;
     return ctx.editMessageText(emptyMsg, { parse_mode: 'HTML' });
   }
 
   const headerTitle = isAll ? "ALL DEPARTMENTS" : cleanDept.toUpperCase();
-  let text = `🎓 <b>APPROVED ROSTER — ${headerTitle}</b> (${res.rows.length} Total)\n\n`;
+  let text = `🎓 <b>APPROVED ROSTER — ${escapeHtml(headerTitle)}</b> (${res.rows.length} Total)\n\n`;
   let currentGroupDept = "";
 
   for (let idx = 0; idx < res.rows.length; idx++) {
     const r = res.rows[idx];
     const rawUname = r.username ? `@${r.username}` : `[No @username]`;
-    // Escape HTML special characters
-    const uname = rawUname.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const uname = escapeHtml(rawUname);
     const dateStr = new Date(r.updated_at).toLocaleDateString();
-    const rawStaff = r.processed_by ? ` (Staff: ${r.processed_by})` : '';
-    const staff = rawStaff.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const staff = r.processed_by ? ` (Staff: ${escapeHtml(r.processed_by)})` : '';
 
     let itemText = "";
     if (isAll && r.department !== currentGroupDept) {
       currentGroupDept = r.department;
-      itemText += `\n📁 <b>${currentGroupDept.replace(/&/g, '&amp;')}</b>\n`;
+      itemText += `\n📁 <b>${escapeHtml(currentGroupDept)}</b>\n`;
     }
 
     itemText += `${idx + 1}. <b>${uname}</b> (ID: <code>${r.user_id}</code>)\n   • Approved: ${dateStr}${staff}\n`;
@@ -949,6 +927,7 @@ bot.callbackQuery(/^roster_(.+)$/, async (ctx) => {
     await ctx.reply(text, { parse_mode: 'HTML' });
   }
 });
+bot.callbackQuery(/^notify_mod_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   if (!(await isStaff(ctx))) return;
 
@@ -1147,6 +1126,7 @@ bot.callbackQuery(/^moddept_(.+)$/, async (ctx) => {
     `✅ Selected Department:\n${dept}\n\nNow, simply send or forward the PDF document for this module.`
   );
 });
+
 bot.callbackQuery('cmd_submit', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = ctx.from.id;
