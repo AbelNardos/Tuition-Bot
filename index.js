@@ -7,6 +7,7 @@ const path = require('path');
 const https = require('https');
 const cron = require('node-cron');
 const PDFDocument = require('pdfkit');
+const QRCode = require('qrcode');
 
 const app = express();
 app.use(express.json());
@@ -164,8 +165,7 @@ async function setPendingDepartment(userId, dept) {
     await pool.query(`
       INSERT INTO user_settings (user_id, pending_department) 
       VALUES ($1, $2)
-      ON CONFLICT (user_id) 
-      DO UPDATE SET pending_department = $2
+      ON CONFLICT (user_id) DO UPDATE SET pending_department = $2
     `, [userId, dept]);
   } catch (err) {}
 }
@@ -189,8 +189,7 @@ async function setStaffPendingModuleDept(userId, dept) {
     await pool.query(`
       INSERT INTO user_settings (user_id, pending_module_dept) 
       VALUES ($1, $2)
-      ON CONFLICT (user_id) 
-      DO UPDATE SET pending_module_dept = $2
+      ON CONFLICT (user_id) DO UPDATE SET pending_module_dept = $2
     `, [userId, dept]);
   } catch (err) {}
 }
@@ -393,33 +392,50 @@ function getRejectionReasonKeyboard(userId, topicId) {
   return kb;
 }
 
-async function generateApprovalPDF(userId, username, department, staffName) {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 50 });
-    const filePath = path.join(__dirname, `approval_slip_${userId}.pdf`);
-    const stream = fs.createWriteStream(filePath);
+// GENERATE APPROVAL PDF WITH EMBEDDED LIVE VERIFICATION QR CODE
+async function generateApprovalPDF(userId, username, department, staffName, botUsername) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ margin: 50 });
+      const filePath = path.join(__dirname, `approval_slip_${userId}.pdf`);
+      const stream = fs.createWriteStream(filePath);
 
-    doc.pipe(stream);
+      doc.pipe(stream);
 
-    doc.fontSize(20).text('RENAISSANCE GLOBAL', { align: 'center' });
-    doc.fontSize(14).text('Official Tuition Payment Approval Slip', { align: 'center' });
-    doc.moveDown(2);
+      // Title & Header
+      doc.fontSize(20).text('RENAISSANCE GLOBAL', { align: 'center' });
+      doc.fontSize(14).text('Official Tuition Payment Approval Slip', { align: 'center' });
+      doc.moveDown(2);
 
-    doc.fontSize(12);
-    doc.text(`Student ID: ${userId}`);
-    doc.text(`Username: @${username}`);
-    doc.text(`Department: ${department}`);
-    doc.text(`Status: APPROVED`);
-    doc.text(`Processed By: ${staffName}`);
-    doc.text(`Date: ${new Date().toLocaleString()}`);
-    doc.moveDown(4);
+      // Generate verification QR code
+      const qrData = botUsername 
+        ? `https://t.me/${botUsername}?start=verify_${userId}`
+        : `RENAISSANCE_GLOBAL_VERIFY:${userId}`;
+      const qrBuffer = await QRCode.toBuffer(qrData, { width: 100, margin: 1 });
 
-    doc.fontSize(10).text('This is an official computer-generated receipt approval slip from the Renaissance Global Student Portal.', { align: 'center' });
+      // Embed QR code on top-right
+      doc.image(qrBuffer, 440, 110, { width: 95 });
+      doc.fontSize(8).text('Scan with camera to verify live clearance', 430, 210, { width: 115, align: 'center' });
 
-    doc.end();
+      // Student and Receipt Details
+      doc.fontSize(12);
+      doc.text(`Student ID: ${userId}`);
+      doc.text(`Username: @${username}`);
+      doc.text(`Department: ${department}`);
+      doc.text(`Status: APPROVED & CLEARED`);
+      doc.text(`Processed By: ${staffName}`);
+      doc.text(`Issue Date: ${new Date().toLocaleString()}`);
+      doc.moveDown(4);
 
-    stream.on('finish', () => resolve(filePath));
-    stream.on('error', reject);
+      doc.fontSize(10).text('This is an official computer-generated tuition verification slip from the Renaissance Global Student Portal. Any alterations or unauthorized reproductions invalidate this document.', { align: 'center' });
+
+      doc.end();
+
+      stream.on('finish', () => resolve(filePath));
+      stream.on('error', reject);
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 
@@ -627,6 +643,32 @@ bot.command('bind', async (ctx) => {
 });
 
 bot.command(['start', 'panel'], async (ctx) => {
+  // LIVE QR CODE VERIFICATION CHECK (When scanned via camera)
+  if (ctx.match && typeof ctx.match === 'string' && ctx.match.startsWith('verify_')) {
+    const verifyId = ctx.match.replace('verify_', '').trim();
+    const check = await pool.query(
+      "SELECT department, status, rejection_reason, updated_at FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1",
+      [verifyId]
+    );
+
+    if (check.rows.length === 0) {
+      return ctx.reply(`⚠️ No official registration record found for Student ID: \`${verifyId}\``, { parse_mode: 'Markdown' });
+    }
+
+    const rec = check.rows[0];
+    if (rec.status === 'APPROVED') {
+      return ctx.reply(
+        `✅ **OFFICIAL VERIFICATION: VALID SLIP**\n\n• **Student ID:** \`${verifyId}\`\n• **Department:** ${rec.department}\n• **Status:** APPROVED & CLEARED\n• **Clearance Date:** ${new Date(rec.updated_at).toLocaleDateString()}\n\n_This student is officially cleared for campus entry and examinations._`,
+        { parse_mode: 'Markdown' }
+      );
+    } else {
+      return ctx.reply(
+        `🚨 **OFFICIAL VERIFICATION: INVALID / VOIDED SLIP**\n\n• **Student ID:** \`${verifyId}\`\n• **Department:** ${rec.department}\n• **Status:** ❌ ${rec.status}\n\n⚠️ **WARNING:** This slip has been revoked or rejected by administration. Do not accept this document!`,
+        { parse_mode: 'Markdown' }
+      );
+    }
+  }
+
   const staffGroupId = await getActiveStaffGroupId();
   const isStaffGroup = String(ctx.chat.id) === staffGroupId;
   const isPrivate = ctx.chat.type === 'private';
@@ -658,13 +700,77 @@ bot.command(['start', 'panel'], async (ctx) => {
   }
 });
 
+// /revoke COMMAND (REVERSES ACCIDENTAL APPROVALS)
+bot.command('revoke', async (ctx) => {
+  const authorized = await isStaff(ctx);
+  if (!authorized) return;
+
+  const topicId = ctx.message.message_thread_id;
+  let targetIdStr = ctx.message.text.replace(/^\/revoke/, '').trim();
+
+  if (!targetIdStr && ctx.message.reply_to_message && ctx.message.reply_to_message.text) {
+    const match = ctx.message.reply_to_message.text.match(/Student ID:\s*`?(\d+)`?/i);
+    if (match) targetIdStr = match[1];
+  }
+
+  const targetUserId = Number(targetIdStr);
+  if (!targetUserId) {
+    return ctx.reply(
+      "⚠️ **How to use:**\nType: `/revoke <StudentID>`\n*Example:* `/revoke 123456789`\n\n*(Or reply directly to any approved message with `/revoke`)*",
+      { message_thread_id: topicId, parse_mode: 'Markdown' }
+    );
+  }
+
+  const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `Staff`;
+
+  const updateRes = await pool.query(
+    `UPDATE tickets 
+     SET status = 'REJECTED', 
+         rejection_reason = 'Approval revoked by administration (Verification error / Audit mismatch)', 
+         processed_by = $1, 
+         updated_at = CURRENT_TIMESTAMP 
+     WHERE id = (
+       SELECT id FROM tickets WHERE user_id = $2 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1
+     ) RETURNING department, panel_msg_id`,
+    [staffName, targetUserId]
+  );
+
+  if (updateRes.rowCount === 0) {
+    return ctx.reply(`⚠️ No approved record found to revoke for Student ID: \`${targetUserId}\`.`, { message_thread_id: topicId, parse_mode: 'Markdown' });
+  }
+
+  const { department, panel_msg_id } = updateRes.rows[0];
+  const studentLang = await getUserLang(targetUserId);
+
+  if (panel_msg_id) {
+    try {
+      await ctx.api.editMessageReplyMarkup(targetUserId, Number(panel_msg_id), {
+        reply_markup: getStudentKeyboard(studentLang, 'REJECTED')
+      });
+    } catch (e) {}
+  }
+
+  const notifMsg = studentLang === 'am'
+    ? `⚠️ **የውሳኔ ማስተካከያ ማሳሰቢያ**\n\nውድ ተማሪ፣ ለ**${department}** የተሰጠው የክፍያ ማረጋገጫ በገንዘብ ያዥ ቡድኑ በስህተት በመጽደቁ ምክንያት ውድቅ ተደርጓል።\n\n❌ **ሁኔታ:** ውድቅ ተደርጓል (Revoked)\n📌 **ማሳሰቢያ:** ቀደም ሲል ያወረዱት ፒዲኤፍ ደረሰኝ በፈተና ወቅት ተቀባይነት የለውም።\n\nእባክዎን ትክክለኛውን ደረሰኝ እንደገና ይላኩ።`
+    : `⚠️ **NOTICE OF APPROVAL REVOCATION**\n\nDear Student,\nYour tuition approval for **${department}** has been revoked by administration due to an audit check / issued in error.\n\n❌ **Status:** REVOKED / REJECTED\n📌 **Warning:** Any previously printed or downloaded slip is now officially VOID.\n\nPlease re-upload your valid bank receipt below:`;
+
+  const resubmitKb = new InlineKeyboard().text(STRINGS[studentLang].reuploadBtn, "start_resubmit");
+  try {
+    await ctx.api.sendMessage(targetUserId, notifMsg, { parse_mode: 'Markdown', reply_markup: resubmitKb });
+  } catch (e) {}
+
+  await ctx.reply(
+    `✅ **Approval Revoked Successfully!**\n\n• **Student ID:** \`${targetUserId}\`\n• **Department:** ${department}\n• **Revoked by:** ${staffName}\n\n_Student has been notified, modules are re-locked, and any camera scan of their old PDF slip will now report VOID._`,
+    { message_thread_id: topicId, parse_mode: 'Markdown' }
+  );
+});
+
 // TYPO-PROOF /changedept COMMAND
 bot.command(['changedept', 'changedep'], async (ctx) => {
   const authorized = await isStaff(ctx);
   if (!authorized) return;
 
   const topicId = ctx.message.message_thread_id;
-
   let targetIdStr = ctx.message.text.replace(/^\/(changedept|changedep)/, '').trim();
 
   if (!targetIdStr && ctx.message.reply_to_message && ctx.message.reply_to_message.text) {
@@ -1170,9 +1276,10 @@ bot.callbackQuery('cmd_download_pdf', async (ctx) => {
   }
 
   const { department, username, processed_by } = res.rows[0];
+  const botUsername = ctx.me?.username;
 
   try {
-    const pdfPath = await generateApprovalPDF(userId, username || 'N/A', department, processed_by || 'Finance Team');
+    const pdfPath = await generateApprovalPDF(userId, username || 'N/A', department, processed_by || 'Finance Team', botUsername);
     await ctx.replyWithDocument(
       new InputFile(pdfPath, `Tuition_Approval_Slip_${userId}.pdf`),
       { caption: t.approvedMsg, parse_mode: 'Markdown' }
@@ -1996,7 +2103,8 @@ async function main() {
       { command: 'bind', description: 'Bind current group as staff panel (Admins only)' },
       { command: 'changedept', description: 'Change approved student department (Staff only)' },
       { command: 'deletemodule', description: 'Delete course module from database (Staff only)' },
-      { command: 'approved', description: 'View approved students directory (Staff only)' }
+      { command: 'approved', description: 'View approved students directory (Staff only)' },
+      { command: 'revoke', description: 'Revoke approved tuition payment (Staff only)' }
     ]);
   } catch (cmdErr) {
     console.error("Failed to register bot commands:", cmdErr.message);
