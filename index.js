@@ -25,7 +25,7 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception thrown:', err);
 });
 
-// Self keep-alive ping for external web service
+// Keep-alive ping for external web service
 setInterval(() => {
   const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
   if (RENDER_URL) {
@@ -97,6 +97,14 @@ async function initDB() {
       file_id TEXT NOT NULL,
       file_name TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS module_downloads (
+      id SERIAL PRIMARY KEY,
+      module_id INT REFERENCES department_modules(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL,
+      downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(module_id, user_id)
     );
   `);
 
@@ -324,8 +332,9 @@ function getStaffKeyboard() {
     .text('📊 Statistics', 'cmd_stats').row()
     .text('📄 Export CSV', 'cmd_export')
     .text('📢 Broadcast', 'cmd_broadcast').row()
-    .text('📚 Upload Course Module', 'cmd_upload_module')
-    .text('🗑 Delete Module', 'cmd_delete_module');
+    .text('📚 Upload Module', 'cmd_upload_module')
+    .text('🗑 Delete Module', 'cmd_delete_module').row()
+    .text('📈 Module Analytics', 'cmd_mod_analytics');
 }
 
 function getModuleDepartmentKeyboard() {
@@ -831,6 +840,102 @@ bot.callbackQuery(/^confirm_delmod_(\d+)$/, async (ctx) => {
   );
 });
 
+// FEATURE 1: NOTIFY ENROLLED STUDENTS BROADCAST HANDLERS
+bot.callbackQuery(/^notify_mod_(\d+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (!(await isStaff(ctx))) return;
+
+  const moduleId = Number(ctx.match[1]);
+  const modRes = await pool.query('SELECT title, department, file_id FROM department_modules WHERE id = $1', [moduleId]);
+  if (modRes.rows.length === 0) {
+    return ctx.editMessageText("⚠️ Module no longer exists or was removed.");
+  }
+
+  const { title, department } = modRes.rows[0];
+  const cleanDept = department.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
+
+  const studentsRes = await pool.query(
+    "SELECT DISTINCT user_id FROM tickets WHERE status = 'APPROVED' AND department ILIKE $1",
+    [`%${cleanDept}%`]
+  );
+
+  const students = studentsRes.rows;
+  if (students.length === 0) {
+    return ctx.editMessageText(`ℹ️ No approved students enrolled in **${cleanDept}** to notify.`);
+  }
+
+  let sentCount = 0;
+  for (const s of students) {
+    try {
+      const sLang = await getUserLang(s.user_id);
+      const notifText = sLang === 'am'
+        ? `📚 **አዲስ የትምህርት ሞጁል ተጭኗል!**\n\n• **ክፍል:** ${cleanDept}\n• **ሞጁል:** ${title}\n\nከታች ያለውን ቁልፍ በመጫን ወዲያውኑ ማውረድ ይችላሉ፡`
+        : `📚 **NEW COURSE MODULE AVAILABLE**\n\n• **Department:** ${cleanDept}\n• **Module:** ${title}\n\nTap below to download directly to your chat:`;
+
+      const dlKb = new InlineKeyboard().text(sLang === 'am' ? "⬇️ አውርድ (Download)" : "⬇️ Download Module", `dlmod_${moduleId}`);
+      await bot.api.sendMessage(s.user_id, notifText, { parse_mode: 'Markdown', reply_markup: dlKb });
+      sentCount++;
+    } catch (e) {}
+  }
+
+  await ctx.editMessageText(
+    `📢 **Notification Broadcast Complete!**\n\n• **Module:** ${title}\n• **Department:** ${cleanDept}\n• **Delivered to:** ${sentCount} / ${students.length} approved students.`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
+bot.callbackQuery('dismiss_mod_notify', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  await ctx.editMessageText("🔕 Notification skipped. Module uploaded silently.");
+});
+
+// FEATURE 5: MODULE DOWNLOAD ENGAGEMENT ANALYTICS
+bot.callbackQuery('cmd_mod_analytics', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (!(await isStaff(ctx))) return;
+
+  const topicId = ctx.callbackQuery.message.message_thread_id;
+
+  const res = await pool.query(`
+    SELECT 
+      m.id, 
+      m.title, 
+      m.department,
+      COUNT(DISTINCT d.user_id) AS total_downloads
+    FROM department_modules m
+    LEFT JOIN module_downloads d ON m.id = d.module_id
+    GROUP BY m.id, m.title, m.department
+    ORDER BY m.department ASC, total_downloads DESC
+  `);
+
+  if (res.rows.length === 0) {
+    return ctx.reply("📊 **Module Analytics:** No modules uploaded yet.", { message_thread_id: topicId });
+  }
+
+  let text = "📈 **COURSE MODULE ENGAGEMENT ANALYTICS**\n\n";
+  let currentDept = "";
+
+  for (const row of res.rows) {
+    if (row.department !== currentDept) {
+      currentDept = row.department;
+      text += `\n📁 **${currentDept}**\n`;
+    }
+
+    const cleanDept = currentDept.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
+    const enrolledRes = await pool.query(
+      "SELECT COUNT(DISTINCT user_id) as count FROM tickets WHERE status = 'APPROVED' AND department ILIKE $1",
+      [`%${cleanDept}%`]
+    );
+    const totalEnrolled = Number(enrolledRes.rows[0].count) || 0;
+    const downloads = Number(row.total_downloads);
+    const percentage = totalEnrolled > 0 ? Math.round((downloads / totalEnrolled) * 100) : 0;
+
+    text += `• **${row.title}**\n  ↳ Downloaded by: **${downloads}/${totalEnrolled} students** (${percentage}%)\n`;
+  }
+
+  await ctx.reply(text, { message_thread_id: topicId, parse_mode: 'Markdown' });
+});
+
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const lang = ctx.match[1];
@@ -1056,6 +1161,18 @@ bot.callbackQuery(/^dlmod_(\d+)$/, async (ctx) => {
   }
 
   const mod = res.rows[0];
+
+  // FEATURE 5: Log unique student download for analytics
+  try {
+    await pool.query(`
+      INSERT INTO module_downloads (module_id, user_id)
+      VALUES ($1, $2)
+      ON CONFLICT (module_id, user_id) DO NOTHING
+    `, [moduleId, ctx.from.id]);
+  } catch (logErr) {
+    console.error("Error logging module download:", logErr);
+  }
+
   try {
     await ctx.replyWithDocument(mod.file_id, {
       caption: `📖 **${mod.title}**\n\n_Renaissance Global Official Course Module_`,
@@ -1284,10 +1401,11 @@ bot.command(['module', 'uploadmodule'], async (ctx) => {
     }
 
     const savedFileId = vaultMsg.document.file_id;
-    await pool.query(
-      "INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4)",
+    const insRes = await pool.query(
+      "INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4) RETURNING id",
       [dept, title, savedFileId, doc.file_name || `${title}.pdf`]
     );
+    const newModId = insRes.rows[0].id;
 
     const isInsideVault = String(ctx.chat.id) === staffGroupId && ctx.message.message_thread_id === vaultTopicId;
     if (ctx.chat.type !== 'private' && !isInsideVault) {
@@ -1301,13 +1419,21 @@ bot.command(['module', 'uploadmodule'], async (ctx) => {
       }
     }
 
+    // FEATURE 1: Offer broadcast button
+    const notifyKb = new InlineKeyboard()
+      .text("📢 Notify Enrolled Students", `notify_mod_${newModId}`).row()
+      .text("🔕 Silent Upload", "dismiss_mod_notify");
+
     if (ctx.chat.type === 'private') {
-      await ctx.reply(`✅ **Successfully Stashed in Vault!**\n\n• **Department:** ${dept}\n• **Title:** ${title}\n• Archived into the staff group modules vault and live for approved students!`, { parse_mode: 'Markdown' });
+      await ctx.reply(
+        `✅ **Successfully Stashed in Vault!**\n\n• **Department:** ${dept}\n• **Title:** ${title}\n\nWould you like to broadcast this release to enrolled students?`,
+        { parse_mode: 'Markdown', reply_markup: notifyKb }
+      );
     } else {
       await ctx.api.sendMessage(
         staffGroupId,
-        `✅ Stashed new module for **${dept}** into Vault.`,
-        { message_thread_id: vaultTopicId, parse_mode: 'Markdown' }
+        `✅ Stashed new module for **${dept}** into Vault.\n\nNotify enrolled students now?`,
+        { message_thread_id: vaultTopicId, parse_mode: 'Markdown', reply_markup: notifyKb }
       );
     }
 
@@ -1464,7 +1590,7 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   }
 });
 
-// MAIN MESSAGE HANDLER (CATCHES BOTH RECEIPTS AND INTERACTIVE MODULE UPLOADS)
+// MAIN MESSAGE HANDLER (CATCHES RECEIPTS AND INTERACTIVE MODULE UPLOADS)
 bot.on('message', async (ctx) => {
   if (ctx.from && ctx.from.is_bot) return;
   if (ctx.message.text && ctx.message.text.startsWith('/')) return;
@@ -1498,10 +1624,11 @@ bot.on('message', async (ctx) => {
         parse_mode: 'Markdown'
       });
 
-      await pool.query(
-        "INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4)",
+      const insRes = await pool.query(
+        "INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4) RETURNING id",
         [staffDept, moduleTitle, vaultMsg.document.file_id, doc.file_name || `${moduleTitle}.pdf`]
       );
+      const newModId = insRes.rows[0].id;
 
       await clearStaffPendingModuleDept(ctx.from.id);
 
@@ -1510,9 +1637,14 @@ bot.on('message', async (ctx) => {
         await ctx.deleteMessage();
       } catch (delErr) {}
 
+      // FEATURE 1: Prompt for instant student broadcast
+      const notifyKb = new InlineKeyboard()
+        .text("📢 Notify Enrolled Students", `notify_mod_${newModId}`).row()
+        .text("🔕 Silent Upload", "dismiss_mod_notify");
+
       return ctx.reply(
-        `✅ **Module Stashed Successfully!**\n\n• **Department:** ${staffDept}\n• **Title:** ${moduleTitle}\n• Saved in **📚 [Course Modules Vault]** and live for students!`,
-        { message_thread_id: topicId, parse_mode: 'Markdown' }
+        `✅ **Module Stashed Successfully!**\n\n• **Department:** ${staffDept}\n• **Title:** ${moduleTitle}\n• Saved in **📚 [Course Modules Vault]**!\n\nNotify enrolled students now?`,
+        { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: notifyKb }
       );
     } catch (err) {
       console.error("Error processing staff module upload:", err);
