@@ -25,6 +25,7 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception thrown:', err);
 });
 
+// Self keep-alive ping
 setInterval(() => {
   const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
   if (RENDER_URL) {
@@ -190,9 +191,7 @@ async function getStaffPendingModuleDept(userId) {
     if (res.rows.length > 0) {
       return res.rows[0].pending_module_dept;
     }
-  } catch (err) {
-    console.error("Error fetching staff pending module dept:", err);
-  }
+  } catch (err) {}
   return null;
 }
 
@@ -204,17 +203,13 @@ async function setStaffPendingModuleDept(userId, dept) {
       ON CONFLICT (user_id) 
       DO UPDATE SET pending_module_dept = $2
     `, [userId, dept]);
-  } catch (err) {
-    console.error("Error setting staff pending module dept:", err);
-  }
+  } catch (err) {}
 }
 
 async function clearStaffPendingModuleDept(userId) {
   try {
     await pool.query('UPDATE user_settings SET pending_module_dept = NULL WHERE user_id = $1', [userId]);
-  } catch (err) {
-    console.error("Error clearing staff pending module dept:", err);
-  }
+  } catch (err) {}
 }
 
 async function isStaff(ctx) {
@@ -657,6 +652,109 @@ bot.command(['start', 'panel'], async (ctx) => {
       "🌐 **Please select your language / እባክዎን ቋንቋ ይምረጡ:**",
       { parse_mode: 'Markdown', reply_markup: langKeyboard }
     );
+  }
+});
+
+// TYPO-PROOF /changedept COMMAND
+bot.command(['changedept', 'changedep'], async (ctx) => {
+  const authorized = await isStaff(ctx);
+  if (!authorized) return;
+
+  const topicId = ctx.message.message_thread_id;
+
+  let targetIdStr = ctx.message.text.replace(/^\/(changedept|changedep)/, '').trim();
+
+  if (!targetIdStr && ctx.message.reply_to_message && ctx.message.reply_to_message.text) {
+    const match = ctx.message.reply_to_message.text.match(/Student ID:\s*`?(\d+)`?/i);
+    if (match) targetIdStr = match[1];
+  }
+
+  const targetUserId = Number(targetIdStr);
+  if (!targetUserId) {
+    return ctx.reply(
+      "⚠️ **How to use:**\nType: `/changedept <StudentID>`\n*Example:* `/changedept 123456789`\n\n*(Or reply directly to the student's approval slip with `/changedept`)*",
+      { message_thread_id: topicId, parse_mode: 'Markdown' }
+    );
+  }
+
+  const res = await pool.query(
+    "SELECT id, username, department FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1",
+    [targetUserId]
+  );
+
+  if (res.rows.length === 0) {
+    return ctx.reply(`⚠️ No approved record found for Student ID: \`${targetUserId}\`.`, { message_thread_id: topicId, parse_mode: 'Markdown' });
+  }
+
+  const { username, department } = res.rows[0];
+
+  const kb = new InlineKeyboard()
+    .text("📈 Marketing", `chgdept_${targetUserId}_mkt`)
+    .text("💼 Business", `chgdept_${targetUserId}_biz`).row()
+    .text("📊 Accounting & Finance", `chgdept_${targetUserId}_acc`).row()
+    .text("🌾 Agribusiness & VCM", `chgdept_${targetUserId}_agri`).row()
+    .text("📚 Ed. Planning & Mgmt", `chgdept_${targetUserId}_ed`).row()
+    .text("🚚 Logistics & SCM", `chgdept_${targetUserId}_log`).row()
+    .text("🔙 Cancel", `chgdept_${targetUserId}_cancel`);
+
+  await ctx.reply(
+    `🔄 **Change Academic Placement**\n\n• **Student ID:** \`${targetUserId}\`\n• **Username:** @${username || 'N/A'}\n• **Current Dept:** ${department}\n\nSelect the new department below:`,
+    { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: kb }
+  );
+});
+
+bot.callbackQuery(/^chgdept_(\d+)_(mkt|biz|acc|agri|ed|log|cancel)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+
+  const targetUserId = Number(ctx.match[1]);
+  const deptCode = ctx.match[2];
+  const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `Staff`;
+
+  if (deptCode === 'cancel') {
+    return ctx.editMessageText("❌ Department change cancelled.");
+  }
+
+  const deptMap = {
+    mkt: "Marketing Management",
+    biz: "Business Management",
+    acc: "Accounting and finance",
+    agri: "Agribusiness and Value chain management",
+    ed: "Educational planning and management",
+    log: "Logistics and Supply chain management"
+  };
+
+  const ticketRes = await pool.query(
+    "SELECT id, department FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1",
+    [targetUserId]
+  );
+
+  if (ticketRes.rows.length === 0) {
+    return ctx.editMessageText("⚠️ Could not find approved ticket to update.");
+  }
+
+  const oldDept = ticketRes.rows[0].department || '';
+  const planSuffix = oldDept.includes("(4-Year Complete)") ? "(4-Year Complete)" : "(Regular / Term)";
+  const newFullDept = `${deptMap[deptCode]} ${planSuffix}`;
+
+  await pool.query(
+    "UPDATE tickets SET department = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3",
+    [newFullDept, staffName, ticketRes.rows[0].id]
+  );
+
+  await ctx.editMessageText(
+    `✅ **Department Changed Successfully!**\n\n• **Student ID:** \`${targetUserId}\`\n• **New Department:** ${newFullDept}\n• **Updated by:** ${staffName}\n\n_Student's module library has been automatically switched to the new department._`,
+    { parse_mode: 'Markdown' }
+  );
+
+  try {
+    const studentLang = await getUserLang(targetUserId);
+    const notifMsg = studentLang === 'am'
+      ? `🔄 **የትምህርት ክፍልዎ ተቀይሯል**\n\nአዲሱ የትምህርት ክፍልዎ፡ **${newFullDept}**\n\nአሁን አዲሶቹን የትምህርት ሞጁሎች በ '📚 የትምህርት ሞጁሎች' በኩል ማውረድ ይችላሉ።`
+      : `🔄 **Academic Placement Updated**\n\nYour academic department has been officially updated to:\n👉 **${newFullDept}**\n\nYou can now access your new course materials under **📚 Course Modules** in your portal!`;
+
+    await bot.api.sendMessage(targetUserId, notifMsg, { parse_mode: 'Markdown' });
+  } catch (err) {
+    console.error("Could not notify student of dept change:", err);
   }
 });
 
@@ -1586,7 +1684,8 @@ async function main() {
     await bot.api.setMyCommands([
       { command: 'start', description: 'Start payment receipt submission' },
       { command: 'panel', description: 'Open interactive action panel' },
-      { command: 'bind', description: 'Bind current group as staff panel (Admins only)' }
+      { command: 'bind', description: 'Bind current group as staff panel (Admins only)' },
+      { command: 'changedept', description: 'Change approved student department (Staff only)' }
     ]);
   } catch (cmdErr) {
     console.error("Failed to register bot commands:", cmdErr.message);
