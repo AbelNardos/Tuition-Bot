@@ -210,6 +210,15 @@ bot.use(async (ctx, next) => {
   await next();
 });
 
+const DEPT_MAP = {
+  mkt: "Marketing Management",
+  biz: "Business Management",
+  acc: "Accounting and finance",
+  agri: "Agribusiness and Value chain management",
+  ed: "Educational planning and management",
+  log: "Logistics and Supply chain management"
+};
+
 const STRINGS = {
   en: {
     portalWelcome: "👋 **Welcome to Renaissance Global Student Portal**\n\n🎯 **Quick Guide:**\n1️⃣ Select your payment type & department\n2️⃣ Upload a clear photo of your receipt\n3️⃣ Receive your official approval slip instantly upon verification!\n\nSelect an option below to begin:",
@@ -296,8 +305,20 @@ function getStaffKeyboard() {
   return new InlineKeyboard()
     .text('🔍 Search Record', 'cmd_lookfor')
     .text('📊 Statistics', 'cmd_stats').row()
+    .text('📚 Upload Module', 'cmd_staff_upload_mod').row()
     .text('📄 Export CSV', 'cmd_export')
     .text('📢 Broadcast', 'cmd_broadcast');
+}
+
+function getStaffModuleDeptKeyboard() {
+  return new InlineKeyboard()
+    .text("📈 Marketing", "moddept_mkt")
+    .text("💼 Business", "moddept_biz").row()
+    .text("📊 Accounting & Finance", "moddept_acc").row()
+    .text("🌾 Agribusiness & VCM", "moddept_agri").row()
+    .text("📚 Ed. Planning & Mgmt", "moddept_ed").row()
+    .text("🚚 Logistics & SCM", "moddept_log").row()
+    .text("🔙 Cancel", "moddept_cancel");
 }
 
 function getStudentKeyboard(lang = 'en', status = null) {
@@ -606,6 +627,15 @@ bot.command(['start', 'panel'], async (ctx) => {
     const userId = ctx.from.id;
     await clearPendingDepartment(userId);
 
+    // If a staff member runs /start or /panel in DM, show staff tools option
+    const userIsStaff = await isStaff(ctx);
+    if (userIsStaff) {
+      return ctx.reply(
+        "⚙️ **RENAISSANCE GLOBAL — STAFF ACTION PANEL**\n\nSelect an action below:",
+        { parse_mode: 'Markdown', reply_markup: getStaffKeyboard() }
+      );
+    }
+
     const langKeyboard = new InlineKeyboard()
       .text("🇬🇧 English", "lang_en")
       .text("🇪🇹 አማርኛ", "lang_am");
@@ -615,6 +645,38 @@ bot.command(['start', 'panel'], async (ctx) => {
       { parse_mode: 'Markdown', reply_markup: langKeyboard }
     );
   }
+});
+
+// STAFF PANEL: UPLOAD MODULE FLOW (BUTTON-BASED)
+bot.callbackQuery('cmd_staff_upload_mod', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const authorized = await isStaff(ctx);
+  if (!authorized) return;
+
+  await ctx.reply(
+    "📚 **Upload Course Module**\n\nPlease select the department this module belongs to:",
+    { parse_mode: 'Markdown', reply_markup: getStaffModuleDeptKeyboard() }
+  );
+});
+
+bot.callbackQuery(/^moddept_(mkt|biz|acc|agri|ed|log)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const deptCode = ctx.match[1];
+  const fullDept = DEPT_MAP[deptCode];
+  const staffId = ctx.from.id;
+
+  await setPendingDepartment(staffId, `UPLOAD_MOD:${fullDept}`);
+
+  await ctx.reply(
+    `✅ Selected Department: **${fullDept}**\n\nNow, simply send or forward the **PDF document** for this module.`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
+bot.callbackQuery('moddept_cancel', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  await clearPendingDepartment(ctx.from.id);
+  await ctx.editMessageText("❌ Module upload cancelled.");
 });
 
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
@@ -961,7 +1023,7 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
   } catch (e) {}
 });
 
-// STAFF MODULE STASH COMMAND (AUTO-CREATES VAULT TOPIC)
+// STAFF MODULE COMMAND BACKUP (SHORT-CODES & AUTO-VAULT)
 bot.command(['module', 'uploadmodule'], async (ctx) => {
   const authorized = await isStaff(ctx);
   if (!authorized) return;
@@ -974,7 +1036,7 @@ bot.command(['module', 'uploadmodule'], async (ctx) => {
   const doc = ctx.message.document || (ctx.message.reply_to_message && ctx.message.reply_to_message.document);
   if (!doc) {
     return ctx.reply(
-      "⚠️ **Please attach or reply to a PDF document.**\n\n*Format:*\n`/module <Department> | <Module Title>`\n\n*Example:*\n`/module Marketing Management | Consumer Behavior 101`",
+      "⚠️ **Please attach or reply to a PDF document.**\n\n*Format:*\n`/module <Department> | <Module Title>`\n\n*Example:*\n`/module mkt | Consumer Behavior 101`",
       { parse_mode: 'Markdown' }
     );
   }
@@ -985,18 +1047,20 @@ bot.command(['module', 'uploadmodule'], async (ctx) => {
 
   if (parts.length < 2 || !parts[0] || !parts[1]) {
     return ctx.reply(
-      "⚠️ **Invalid Format!**\nPlease separate the department and title with a pipe (`|`).\n\n*Example:* `/module Accounting and finance | Financial Accounting I`",
+      "⚠️ **Invalid Format!**\nPlease separate the department and title with a pipe (`|`).\n\n*Example:* `/module acc | Financial Accounting I`",
       { parse_mode: 'Markdown' }
     );
   }
 
-  const [dept, title] = parts;
+  let deptInput = parts[0].toLowerCase();
+  const targetDept = DEPT_MAP[deptInput] || parts[0];
+  const title = parts[1];
   const staffUploader = ctx.from.username ? `@${ctx.from.username}` : `${ctx.from.first_name || 'Staff'}`;
 
   try {
     let vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
 
-    const vaultCaption = `📚 **COURSE MODULE ARCHIVE**\n\n• **Department:** ${dept}\n• **Title:** ${title}\n• **Uploaded by:** ${staffUploader}\n• **File:** \`${doc.file_name || 'document.pdf'}\``;
+    const vaultCaption = `📚 **COURSE MODULE ARCHIVE**\n\n• **Department:** ${targetDept}\n• **Title:** ${title}\n• **Uploaded by:** ${staffUploader}\n• **File:** \`${doc.file_name || 'document.pdf'}\``;
 
     let vaultMsg;
     try {
@@ -1022,7 +1086,7 @@ bot.command(['module', 'uploadmodule'], async (ctx) => {
     const savedFileId = vaultMsg.document.file_id;
     await pool.query(
       "INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4)",
-      [dept, title, savedFileId, doc.file_name || `${title}.pdf`]
+      [targetDept, title, savedFileId, doc.file_name || `${title}.pdf`]
     );
 
     const isInsideVault = String(ctx.chat.id) === staffGroupId && ctx.message.message_thread_id === vaultTopicId;
@@ -1038,11 +1102,11 @@ bot.command(['module', 'uploadmodule'], async (ctx) => {
     }
 
     if (ctx.chat.type === 'private') {
-      await ctx.reply(`✅ **Successfully Stashed in Vault!**\n\n• **Department:** ${dept}\n• **Title:** ${title}\n• Archived into the staff group modules vault and live for approved students!`, { parse_mode: 'Markdown' });
+      await ctx.reply(`✅ **Successfully Stashed in Vault!**\n\n• **Department:** ${targetDept}\n• **Title:** ${title}\n• Archived into the staff group modules vault and live for approved students!`, { parse_mode: 'Markdown' });
     } else {
       await ctx.api.sendMessage(
         staffGroupId,
-        `✅ Stashed new module for **${dept}** into Vault.`,
+        `✅ Stashed new module for **${targetDept}** into Vault.`,
         { message_thread_id: vaultTopicId, parse_mode: 'Markdown' }
       );
     }
@@ -1133,16 +1197,7 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
     planSuffix = "(4-Year Complete)";
   }
 
-  const baseDeptMap = {
-    mkt: "Marketing Management",
-    biz: "Business Management",
-    agri: "Agribusiness and Value chain management",
-    ed: "Educational planning and management",
-    acc: "Accounting and finance",
-    log: "Logistics and Supply chain management"
-  };
-
-  const newDeptTagged = `${baseDeptMap[deptCode]} ${planSuffix}`;
+  const newDeptTagged = `${DEPT_MAP[deptCode]} ${planSuffix}`;
   const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged, staffGroupId);
 
   try {
@@ -1208,7 +1263,9 @@ bot.on('message', async (ctx) => {
   const isStaffGroup = staffGroupId && String(ctx.chat.id) === staffGroupId;
   const isPrivate = ctx.chat.type === 'private';
   const topicId = ctx.message.message_thread_id;
+  const userId = ctx.from.id;
 
+  // 1. STAFF SUPERGROUP REPLIES
   if (isStaffGroup && ctx.message.reply_to_message) {
     const originalMsg = ctx.message.reply_to_message;
 
@@ -1225,8 +1282,44 @@ bot.on('message', async (ctx) => {
     }
   }
 
+  // 2. CHECK IF STAFF IS UPLOADING A MODULE VIA THE BUTTON WIZARD
+  if (isPrivate && ctx.message.document) {
+    const pendingState = await getPendingDepartment(userId);
+    if (pendingState && pendingState.startsWith('UPLOAD_MOD:')) {
+      const targetDept = pendingState.replace('UPLOAD_MOD:', '');
+      const doc = ctx.message.document;
+      const staffUploader = ctx.from.username ? `@${ctx.from.username}` : `${ctx.from.first_name || 'Staff'}`;
+      const cleanTitle = (ctx.message.caption || doc.file_name || 'Course Module').replace(/\.[^/.]+$/, "").replace(/_/g, " ");
+
+      if (!staffGroupId) {
+        return ctx.reply("⚠️ Staff group configuration missing. Please run /bind in your staff group first.");
+      }
+
+      const vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
+      const vaultCaption = `📚 **COURSE MODULE ARCHIVE**\n\n• **Department:** ${targetDept}\n• **Title:** ${cleanTitle}\n• **Uploaded by:** ${staffUploader}\n• **File:** \`${doc.file_name || 'document.pdf'}\``;
+
+      const vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, {
+        message_thread_id: vaultTopicId,
+        caption: vaultCaption,
+        parse_mode: 'Markdown'
+      });
+
+      await pool.query(
+        "INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4)",
+        [targetDept, cleanTitle, vaultMsg.document.file_id, doc.file_name || `${cleanTitle}.pdf`]
+      );
+
+      await clearPendingDepartment(userId);
+
+      return ctx.reply(
+        `✅ **Module Successfully Uploaded!**\n\n• **Department:** ${targetDept}\n• **Title:** ${cleanTitle}\n• It is now archived in the staff vault and available to students!`,
+        { parse_mode: 'Markdown' }
+      );
+    }
+  }
+
+  // 3. STUDENT RECEIPT SUBMISSION
   if (isPrivate) {
-    const userId = ctx.from.id;
     const lang = await getUserLang(userId);
     const t = STRINGS[lang];
 
@@ -1483,3 +1576,4 @@ async function main() {
 }
 
 main();
+
