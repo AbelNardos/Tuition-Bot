@@ -25,7 +25,7 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception thrown:', err);
 });
 
-// Keep-alive ping for external web service
+// Self keep-alive ping for external web service
 setInterval(() => {
   const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
   if (RENDER_URL) {
@@ -334,7 +334,8 @@ function getStaffKeyboard() {
     .text('📢 Broadcast', 'cmd_broadcast').row()
     .text('📚 Upload Module', 'cmd_upload_module')
     .text('🗑 Delete Module', 'cmd_delete_module').row()
-    .text('📈 Module Analytics', 'cmd_mod_analytics');
+    .text('📈 Module Analytics', 'cmd_mod_analytics')
+    .text('👥 Approved Students', 'cmd_approved_roster');
 }
 
 function getModuleDepartmentKeyboard() {
@@ -840,7 +841,112 @@ bot.callbackQuery(/^confirm_delmod_(\d+)$/, async (ctx) => {
   );
 });
 
-// FEATURE 1: NOTIFY ENROLLED STUDENTS BROADCAST HANDLERS
+// APPROVED STUDENTS DIRECTORY ROSTER (WITH ALL DEPARTMENTS OPTION)
+function getApprovedRosterKeyboard() {
+  return new InlineKeyboard()
+    .text("🌐 Every Student (All Departments)", "roster_all").row()
+    .text("📈 Marketing", "roster_Marketing Management")
+    .text("💼 Business", "roster_Business Management").row()
+    .text("📊 Accounting & Finance", "roster_Accounting and finance").row()
+    .text("🌾 Agribusiness & VCM", "roster_Agribusiness and Value chain management").row()
+    .text("📚 Ed. Planning & Mgmt", "roster_Educational planning and management").row()
+    .text("🚚 Logistics & SCM", "roster_Logistics and Supply chain management").row()
+    .text("🔙 Cancel", "roster_cancel");
+}
+
+bot.command(['approved', 'students'], async (ctx) => {
+  const authorized = await isStaff(ctx);
+  if (!authorized) return;
+
+  const topicId = ctx.message.message_thread_id;
+
+  await ctx.reply(
+    "👥 **Approved Students Directory**\n\nSelect **'Every Student'** to see all approved students, or choose a specific department:",
+    { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: getApprovedRosterKeyboard() }
+  );
+});
+
+bot.callbackQuery('cmd_approved_roster', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (!(await isStaff(ctx))) return;
+
+  const topicId = ctx.callbackQuery.message.message_thread_id;
+
+  await ctx.reply(
+    "👥 **Approved Students Directory**\n\nSelect **'Every Student'** to see all approved students, or choose a specific department:",
+    { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: getApprovedRosterKeyboard() }
+  );
+});
+
+bot.callbackQuery(/^roster_(.+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const targetDept = ctx.match[1];
+
+  if (targetDept === 'cancel') {
+    return ctx.editMessageText("❌ Roster view cancelled.");
+  }
+
+  const isAll = targetDept === 'all';
+  const cleanDept = targetDept.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
+
+  let query = `
+    SELECT t.user_id, t.username, t.department, t.processed_by, t.updated_at
+    FROM tickets t
+    INNER JOIN (
+      SELECT user_id, MAX(updated_at) as max_date
+      FROM tickets
+      WHERE status = 'APPROVED'
+      GROUP BY user_id
+    ) latest ON t.user_id = latest.user_id AND t.updated_at = latest.max_date
+    WHERE t.status = 'APPROVED'
+  `;
+
+  const params = [];
+  if (!isAll) {
+    query += ` AND t.department ILIKE $1`;
+    params.push(`%${cleanDept}%`);
+  }
+  query += ` ORDER BY t.department ASC, t.updated_at DESC LIMIT 100`;
+
+  const res = await pool.query(query, params);
+
+  if (res.rows.length === 0) {
+    const emptyMsg = isAll 
+      ? "ℹ️ No approved students registered yet."
+      : `ℹ️ No approved students found in **${cleanDept}**.`;
+    return ctx.editMessageText(emptyMsg, { parse_mode: 'Markdown' });
+  }
+
+  const headerTitle = isAll ? "ALL DEPARTMENTS" : cleanDept.toUpperCase();
+  let text = `🎓 **APPROVED ROSTER — ${headerTitle}** (${res.rows.length} Total)\n\n`;
+  let currentGroupDept = "";
+
+  for (let idx = 0; idx < res.rows.length; idx++) {
+    const r = res.rows[idx];
+    const uname = r.username ? `@${r.username}` : `[No @username]`;
+    const dateStr = new Date(r.updated_at).toLocaleDateString();
+    const staff = r.processed_by ? ` (Staff: ${r.processed_by})` : '';
+
+    let itemText = "";
+    if (isAll && r.department !== currentGroupDept) {
+      currentGroupDept = r.department;
+      itemText += `\n📁 **${currentGroupDept}**\n`;
+    }
+
+    itemText += `${idx + 1}. **${uname}** (ID: \`${r.user_id}\`)\n   • Approved: ${dateStr}${staff}\n`;
+
+    if ((text + itemText).length > 3800) {
+      await ctx.reply(text, { parse_mode: 'Markdown' });
+      text = "";
+    }
+    text += itemText;
+  }
+
+  if (text.trim().length > 0) {
+    await ctx.reply(text, { parse_mode: 'Markdown' });
+  }
+});
+
 bot.callbackQuery(/^notify_mod_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   if (!(await isStaff(ctx))) return;
@@ -889,7 +995,6 @@ bot.callbackQuery('dismiss_mod_notify', async (ctx) => {
   await ctx.editMessageText("🔕 Notification skipped. Module uploaded silently.");
 });
 
-// FEATURE 5: MODULE DOWNLOAD ENGAGEMENT ANALYTICS
 bot.callbackQuery('cmd_mod_analytics', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   if (!(await isStaff(ctx))) return;
@@ -1162,7 +1267,7 @@ bot.callbackQuery(/^dlmod_(\d+)$/, async (ctx) => {
 
   const mod = res.rows[0];
 
-  // FEATURE 5: Log unique student download for analytics
+  // Log unique student download for analytics
   try {
     await pool.query(`
       INSERT INTO module_downloads (module_id, user_id)
@@ -1419,7 +1524,6 @@ bot.command(['module', 'uploadmodule'], async (ctx) => {
       }
     }
 
-    // FEATURE 1: Offer broadcast button
     const notifyKb = new InlineKeyboard()
       .text("📢 Notify Enrolled Students", `notify_mod_${newModId}`).row()
       .text("🔕 Silent Upload", "dismiss_mod_notify");
@@ -1637,7 +1741,6 @@ bot.on('message', async (ctx) => {
         await ctx.deleteMessage();
       } catch (delErr) {}
 
-      // FEATURE 1: Prompt for instant student broadcast
       const notifyKb = new InlineKeyboard()
         .text("📢 Notify Enrolled Students", `notify_mod_${newModId}`).row()
         .text("🔕 Silent Upload", "dismiss_mod_notify");
@@ -1911,7 +2014,8 @@ async function main() {
       { command: 'panel', description: 'Open interactive action panel' },
       { command: 'bind', description: 'Bind current group as staff panel (Admins only)' },
       { command: 'changedept', description: 'Change approved student department (Staff only)' },
-      { command: 'deletemodule', description: 'Delete course module from database (Staff only)' }
+      { command: 'deletemodule', description: 'Delete course module from database (Staff only)' },
+      { command: 'approved', description: 'View approved students directory (Staff only)' }
     ]);
   } catch (cmdErr) {
     console.error("Failed to register bot commands:", cmdErr.message);
