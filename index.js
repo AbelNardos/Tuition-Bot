@@ -25,6 +25,7 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception thrown:', err);
 });
 
+// Keep-alive ping for external web service
 setInterval(() => {
   const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
   if (RENDER_URL) {
@@ -54,10 +55,12 @@ async function initDB() {
     CREATE TABLE IF NOT EXISTS group_settings (
       group_id TEXT PRIMARY KEY,
       is_active BOOLEAN DEFAULT TRUE,
+      modules_topic_id BIGINT,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS tickets (
+      id SERIAL PRIMARY KEY,
       user_id BIGINT,
       username TEXT,
       receipt_file_id TEXT,
@@ -75,7 +78,8 @@ async function initDB() {
 
     CREATE TABLE IF NOT EXISTS user_settings (
       user_id BIGINT PRIMARY KEY,
-      language TEXT DEFAULT 'en'
+      language TEXT DEFAULT 'en',
+      pending_department TEXT
     );
 
     CREATE TABLE IF NOT EXISTS department_topics (
@@ -84,14 +88,33 @@ async function initDB() {
       department TEXT NOT NULL,
       topic_id BIGINT
     );
+
+    CREATE TABLE IF NOT EXISTS department_modules (
+      id SERIAL PRIMARY KEY,
+      department TEXT NOT NULL,
+      title TEXT NOT NULL,
+      file_id TEXT NOT NULL,
+      file_name TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   try {
-    await pool.query(`
-      ALTER TABLE tickets ADD COLUMN IF NOT EXISTS panel_msg_id BIGINT;
-    `);
+    await pool.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS panel_msg_id BIGINT;`);
   } catch (err) {
-    console.error("Migration check error:", err);
+    console.error("Migration check error (panel_msg_id):", err);
+  }
+
+  try {
+    await pool.query(`ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS pending_department TEXT;`);
+  } catch (err) {
+    console.error("Migration check error (pending_department):", err);
+  }
+
+  try {
+    await pool.query(`ALTER TABLE group_settings ADD COLUMN IF NOT EXISTS modules_topic_id BIGINT;`);
+  } catch (err) {
+    console.error("Migration check error (modules_topic_id):", err);
   }
 }
 
@@ -110,7 +133,7 @@ async function getActiveStaffGroupId() {
 async function getUserLang(userId) {
   try {
     const res = await pool.query('SELECT language FROM user_settings WHERE user_id = $1', [userId]);
-    if (res.rows.length > 0) {
+    if (res.rows.length > 0 && res.rows[0].language) {
       return res.rows[0].language;
     }
   } catch (err) {
@@ -121,14 +144,56 @@ async function getUserLang(userId) {
 
 async function setUserLang(userId, lang) {
   try {
-    const check = await pool.query('SELECT 1 FROM user_settings WHERE user_id = $1', [userId]);
-    if (check.rows.length > 0) {
-      await pool.query('UPDATE user_settings SET language = $1 WHERE user_id = $2', [lang, userId]);
-    } else {
-      await pool.query('INSERT INTO user_settings (user_id, language) VALUES ($1, $2)', [userId, lang]);
-    }
+    await pool.query(`
+      INSERT INTO user_settings (user_id, language) VALUES ($1, $2)
+      ON CONFLICT (user_id) DO UPDATE SET language = $2
+    `, [userId, lang]);
   } catch (err) {
     console.error("Error setting user language:", err);
+  }
+}
+
+async function getPendingDepartment(userId) {
+  try {
+    const res = await pool.query('SELECT pending_department FROM user_settings WHERE user_id = $1', [userId]);
+    if (res.rows.length > 0) {
+      return res.rows[0].pending_department;
+    }
+  } catch (err) {
+    console.error("Error fetching pending department:", err);
+  }
+  return null;
+}
+
+async function setPendingDepartment(userId, dept) {
+  try {
+    await pool.query(`
+      INSERT INTO user_settings (user_id, pending_department) 
+      VALUES ($1, $2)
+      ON CONFLICT (user_id) 
+      DO UPDATE SET pending_department = $2
+    `, [userId, dept]);
+  } catch (err) {
+    console.error("Error setting pending department:", err);
+  }
+}
+
+async function clearPendingDepartment(userId) {
+  try {
+    await pool.query('UPDATE user_settings SET pending_department = NULL WHERE user_id = $1', [userId]);
+  } catch (err) {
+    console.error("Error clearing pending department:", err);
+  }
+}
+
+async function isStaff(ctx) {
+  try {
+    const staffGroupId = await getActiveStaffGroupId();
+    if (!staffGroupId) return false;
+    const member = await ctx.api.getChatMember(staffGroupId, ctx.from.id);
+    return ['creator', 'administrator', 'member'].includes(member.status);
+  } catch (err) {
+    return false;
   }
 }
 
@@ -144,8 +209,6 @@ bot.use(async (ctx, next) => {
   }
   await next();
 });
-
-const pendingDepartments = new Map();
 
 const STRINGS = {
   en: {
@@ -249,6 +312,7 @@ function getStudentKeyboard(lang = 'en', status = null) {
       kb.text('📤 ደረሰኝ አስገባ', 'cmd_submit');
     }
     kb.text('📌 ሁኔታውን ያረጋግጡ', 'cmd_status').row();
+    kb.text('📚 የትምህርት ሞጁሎች', 'cmd_modules').row();
     kb.text('📜 የክፍያ ታሪክ', 'cmd_history');
     kb.text('❓ እርዳታ / እገዛ', 'cmd_help');
   } else {
@@ -260,6 +324,7 @@ function getStudentKeyboard(lang = 'en', status = null) {
       kb.text('📤 Submit Payment', 'cmd_submit');
     }
     kb.text('📌 Check Status', 'cmd_status').row();
+    kb.text('📚 Course Modules', 'cmd_modules').row();
     kb.text('📜 My History', 'cmd_history');
     kb.text('❓ Help / Support', 'cmd_help');
   }
@@ -341,6 +406,27 @@ async function getOrCreateDepartmentTopic(ctx, departmentName, targetGroupId) {
   await pool.query(
     'INSERT INTO department_topics (group_id, department, topic_id) VALUES ($1, $2, $3)',
     [targetGroupId, baseDepartment, topicId]
+  );
+
+  return topicId;
+}
+
+async function getOrCreateModulesVaultTopic(ctx, targetGroupId) {
+  const cached = await pool.query(
+    'SELECT modules_topic_id FROM group_settings WHERE group_id = $1 LIMIT 1',
+    [targetGroupId]
+  );
+
+  if (cached.rows.length > 0 && cached.rows[0].modules_topic_id) {
+    return Number(cached.rows[0].modules_topic_id);
+  }
+
+  const newTopic = await ctx.api.createForumTopic(targetGroupId, '📚 [Course Modules Vault]');
+  const topicId = newTopic.message_thread_id;
+
+  await pool.query(
+    'UPDATE group_settings SET modules_topic_id = $1 WHERE group_id = $2',
+    [topicId, targetGroupId]
   );
 
   return topicId;
@@ -470,18 +556,6 @@ async function performBroadcast(ctx, topicId, broadcastMsg) {
   await ctx.reply(`✅ **Broadcast Complete**\n• Delivered: ${successCount}\n• Failed: ${failCount}`, { message_thread_id: topicId });
 }
 
-// Telegram Mini App Launch Command (Placed at top to intercept immediately)
-bot.command('app', async (ctx) => {
-  await ctx.reply("🎓 **Welcome to the Student Portal Mini App!**\n\nClick below to launch:", {
-    parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "🚀 Open Student Portal", web_app: { url: "https://tubular-belekoy-52d941.netlify.app" } }]
-      ]
-    }
-  });
-});
-
 bot.command('bind', async (ctx) => {
   if (ctx.chat.type === 'private') {
     return ctx.reply("⚠️ This command must be executed inside a supergroup with topics/threads enabled.");
@@ -530,7 +604,7 @@ bot.command(['start', 'panel'], async (ctx) => {
 
   if (isPrivate) {
     const userId = ctx.from.id;
-    pendingDepartments.delete(userId);
+    await clearPendingDepartment(userId);
 
     const langKeyboard = new InlineKeyboard()
       .text("🇬🇧 English", "lang_en")
@@ -654,6 +728,78 @@ bot.callbackQuery('cmd_download_pdf', async (ctx) => {
   } catch (err) {
     console.error("Error generating requested PDF:", err);
     await ctx.reply("❌ Unable to generate PDF slip. Please try again later.");
+  }
+});
+
+// STUDENT MODULES BROWSER
+bot.callbackQuery('cmd_modules', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const userId = ctx.from.id;
+  const lang = await getUserLang(userId);
+
+  const checkApproval = await pool.query(
+    "SELECT department FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1",
+    [userId]
+  );
+
+  if (checkApproval.rows.length === 0) {
+    const notApprovedMsg = lang === 'am'
+      ? "🔒 **የሞጁል ማውረጃ ተቆልፏል**\n\nየትምህርት ሞጁሎችን ለማውረድ የክፍያ ደረሰኝዎ በገንዘብ ያዥ ቡድኑ መጽደቅ አለበት። እባክዎን መጀመሪያ ደረሰኝዎን ያስገቡ ወይም ውሳኔ እስኪያገኝ ይጠብቁ።"
+      : "🔒 **Modules Locked**\n\nCourse modules are only accessible to students with an **APPROVED** tuition payment. Please submit your payment receipt first or wait for staff verification.";
+    
+    return ctx.reply(notApprovedMsg, { 
+      parse_mode: 'Markdown',
+      reply_markup: getStudentKeyboard(lang, null)
+    });
+  }
+
+  const studentDept = checkApproval.rows[0].department
+    .replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '')
+    .trim();
+
+  const modulesRes = await pool.query(
+    "SELECT id, title FROM department_modules WHERE department ILIKE $1 ORDER BY id ASC",
+    [`%${studentDept}%`]
+  );
+
+  if (modulesRes.rows.length === 0) {
+    const noModulesMsg = lang === 'am'
+      ? `📚 **ትምህርት ክፍል:** ${studentDept}\n\nለዚህ ክፍል እስካሁን የተጫነ ሞጁል የለም። በቅርቡ ይጫናል።`
+      : `📚 **Department:** ${studentDept}\n\nNo modules uploaded for this department yet. Please check back later.`;
+    
+    return ctx.reply(noModulesMsg, { parse_mode: 'Markdown' });
+  }
+
+  const kb = new InlineKeyboard();
+  modulesRes.rows.forEach((m) => {
+    kb.text(`📄 ${m.title}`, `dlmod_${m.id}`).row();
+  });
+
+  const headerMsg = lang === 'am'
+    ? `📚 **የትምህርት ክፍል ሞጁሎች (${studentDept})**\n\nለማውረድ የሚፈልጉትን ሞጁል ይምረጡ፡`
+    : `📚 **Course Modules (${studentDept})**\n\nSelect a module below to download:`;
+
+  await ctx.reply(headerMsg, { parse_mode: 'Markdown', reply_markup: kb });
+});
+
+bot.callbackQuery(/^dlmod_(\d+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const moduleId = Number(ctx.match[1]);
+
+  const res = await pool.query("SELECT title, file_id, file_name FROM department_modules WHERE id = $1", [moduleId]);
+  if (res.rows.length === 0) {
+    return ctx.reply("⚠️ Module not found or removed.");
+  }
+
+  const mod = res.rows[0];
+  try {
+    await ctx.replyWithDocument(mod.file_id, {
+      caption: `📖 **${mod.title}**\n\n_Renaissance Global Official Course Module_`,
+      parse_mode: 'Markdown'
+    });
+  } catch (err) {
+    console.error("Error sending module document:", err);
+    await ctx.reply("❌ Unable to download this module right now. Please notify administration.");
   }
 });
 
@@ -785,7 +931,7 @@ bot.callbackQuery('start_resubmit', async (ctx) => {
   const lang = await getUserLang(userId);
   const t = STRINGS[lang];
 
-  pendingDepartments.delete(userId);
+  await clearPendingDepartment(userId);
 
   await ctx.reply(
     t.selectPlan,
@@ -805,7 +951,7 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
     ? `${baseDept} (4-Year Complete)`
     : `${baseDept} (Regular / Term)`;
 
-  pendingDepartments.set(userId, fullTaggedDept);
+  await setPendingDepartment(userId, fullTaggedDept);
 
   try {
     await ctx.editMessageText(
@@ -813,6 +959,98 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
       { parse_mode: 'Markdown' }
     );
   } catch (e) {}
+});
+
+// STAFF MODULE STASH COMMAND (AUTO-CREATES VAULT TOPIC)
+bot.command(['module', 'uploadmodule'], async (ctx) => {
+  const authorized = await isStaff(ctx);
+  if (!authorized) return;
+
+  const staffGroupId = await getActiveStaffGroupId();
+  if (!staffGroupId) {
+    return ctx.reply("⚠️ Staff group configuration missing. Please run /bind inside your staff group first.");
+  }
+
+  const doc = ctx.message.document || (ctx.message.reply_to_message && ctx.message.reply_to_message.document);
+  if (!doc) {
+    return ctx.reply(
+      "⚠️ **Please attach or reply to a PDF document.**\n\n*Format:*\n`/module <Department> | <Module Title>`\n\n*Example:*\n`/module Marketing Management | Consumer Behavior 101`",
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  const rawText = ctx.message.caption || ctx.message.text || '';
+  const textArgs = rawText.replace(/^\/(module|uploadmodule)/, '').trim();
+  const parts = textArgs.split('|').map(s => s.trim());
+
+  if (parts.length < 2 || !parts[0] || !parts[1]) {
+    return ctx.reply(
+      "⚠️ **Invalid Format!**\nPlease separate the department and title with a pipe (`|`).\n\n*Example:* `/module Accounting and finance | Financial Accounting I`",
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  const [dept, title] = parts;
+  const staffUploader = ctx.from.username ? `@${ctx.from.username}` : `${ctx.from.first_name || 'Staff'}`;
+
+  try {
+    let vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
+
+    const vaultCaption = `📚 **COURSE MODULE ARCHIVE**\n\n• **Department:** ${dept}\n• **Title:** ${title}\n• **Uploaded by:** ${staffUploader}\n• **File:** \`${doc.file_name || 'document.pdf'}\``;
+
+    let vaultMsg;
+    try {
+      vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, {
+        message_thread_id: vaultTopicId,
+        caption: vaultCaption,
+        parse_mode: 'Markdown'
+      });
+    } catch (sendErr) {
+      if (sendErr.description && sendErr.description.includes('thread not found')) {
+        await pool.query('UPDATE group_settings SET modules_topic_id = NULL WHERE group_id = $1', [staffGroupId]);
+        vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
+        vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, {
+          message_thread_id: vaultTopicId,
+          caption: vaultCaption,
+          parse_mode: 'Markdown'
+        });
+      } else {
+        throw sendErr;
+      }
+    }
+
+    const savedFileId = vaultMsg.document.file_id;
+    await pool.query(
+      "INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4)",
+      [dept, title, savedFileId, doc.file_name || `${title}.pdf`]
+    );
+
+    const isInsideVault = String(ctx.chat.id) === staffGroupId && ctx.message.message_thread_id === vaultTopicId;
+    if (ctx.chat.type !== 'private' && !isInsideVault) {
+      try {
+        await ctx.deleteMessage();
+        if (ctx.message.reply_to_message) {
+          await ctx.api.deleteMessage(ctx.chat.id, ctx.message.reply_to_message.message_id);
+        }
+      } catch (delErr) {
+        console.error("Auto-cleanup delete error:", delErr);
+      }
+    }
+
+    if (ctx.chat.type === 'private') {
+      await ctx.reply(`✅ **Successfully Stashed in Vault!**\n\n• **Department:** ${dept}\n• **Title:** ${title}\n• Archived into the staff group modules vault and live for approved students!`, { parse_mode: 'Markdown' });
+    } else {
+      await ctx.api.sendMessage(
+        staffGroupId,
+        `✅ Stashed new module for **${dept}** into Vault.`,
+        { message_thread_id: vaultTopicId, parse_mode: 'Markdown' }
+      );
+    }
+
+  } catch (err) {
+    console.error("Failed to stash module:", err);
+    await ctx.reply(`❌ Failed to stash module: ${err.message}`);
+  }
 });
 
 bot.callbackQuery(/^trans_(\d+)_(\d+)$/, async (ctx) => {
@@ -905,7 +1143,6 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   };
 
   const newDeptTagged = `${baseDeptMap[deptCode]} ${planSuffix}`;
-
   const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged, staffGroupId);
 
   try {
@@ -965,7 +1202,7 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
 
 bot.on('message', async (ctx) => {
   if (ctx.from && ctx.from.is_bot) return;
-  if (ctx.message.text && ctx.message.text.startsWith('/')) return; // Ignore slash commands
+  if (ctx.message.text && ctx.message.text.startsWith('/')) return;
 
   const staffGroupId = await getActiveStaffGroupId();
   const isStaffGroup = staffGroupId && String(ctx.chat.id) === staffGroupId;
@@ -1002,7 +1239,7 @@ bot.on('message', async (ctx) => {
       return ctx.reply(t.pendingExists, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, 'PENDING') });
     }
 
-    const chosenDeptTagged = pendingDepartments.get(userId);
+    const chosenDeptTagged = await getPendingDepartment(userId);
     if (!chosenDeptTagged) {
       const noDeptMsg = lang === 'am'
         ? "⚠️ **እባክዎን መጀመሪያ ትምህርት ክፍል ይምረጡ**\n\nየመክፈያ ዓይነትዎን እና ትምህርት ክፍልዎን ለመምረጥ ከታች ያለውን ቁልፍ ይጫኑ።"
@@ -1048,7 +1285,7 @@ bot.on('message', async (ctx) => {
         { message_thread_id: topicId, reply_markup: actionKeyboard }
       );
 
-      pendingDepartments.delete(userId);
+      await clearPendingDepartment(userId);
 
       const studentPanelMsg = await ctx.reply(t.receiptReceived, { 
         parse_mode: 'Markdown',
@@ -1226,7 +1463,6 @@ async function main() {
 
     await bot.api.setMyCommands([
       { command: 'start', description: 'Start payment receipt submission' },
-      { command: 'app', description: 'Open Student Portal Mini App' },
       { command: 'panel', description: 'Open interactive action panel' },
       { command: 'bind', description: 'Bind current group as staff panel (Admins only)' }
     ]);
