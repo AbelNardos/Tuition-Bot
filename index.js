@@ -364,44 +364,12 @@ function getApprovedRosterKeyboard() {
   return new InlineKeyboard()
     .text("🌐 Every Student (All Departments)", "roster_all").row()
     .text("📈 Marketing", "roster_Marketing Management")
-    .text("💼 Business", "moddept_Business Management").row()
+    .text("💼 Business", "roster_Business Management").row()
     .text("📊 Accounting & Finance", "roster_Accounting and finance").row()
     .text("🌾 Agribusiness & VCM", "roster_Agribusiness and Value chain management").row()
     .text("📚 Ed. Planning & Mgmt", "roster_Educational planning and management").row()
     .text("🚚 Logistics & SCM", "roster_Logistics and Supply chain management").row()
     .text("🔙 Cancel", "roster_cancel");
-}
-
-function getStudentKeyboard(lang = 'en', status = null) {
-  const kb = new InlineKeyboard();
-
-  if (lang === 'am') {
-    if (status === 'PENDING') {
-      kb.text('⏳ በግምገማ ላይ ነው', 'cmd_pending_info');
-    } else if (status === 'APPROVED') {
-      kb.text('⬇️ ደረሰኝ አውርድ', 'cmd_download_pdf');
-    } else {
-      kb.text('📤 ደረሰኝ አስገባ', 'cmd_submit');
-    }
-    kb.text('📌 ሁኔታውን ያረጋግጡ', 'cmd_status').row();
-    kb.text('📚 የትምህርት ሞጁሎች', 'cmd_modules').row();
-    kb.text('📜 የክፍያ ታሪክ', 'cmd_history');
-    kb.text('❓ እርዳታ / እገዛ', 'cmd_help');
-  } else {
-    if (status === 'PENDING') {
-      kb.text('⏳ Under Review', 'cmd_pending_info');
-    } else if (status === 'APPROVED') {
-      kb.text('⬇️ Download Slip', 'cmd_download_pdf');
-    } else {
-      kb.text('📤 Submit Payment', 'cmd_submit');
-    }
-    kb.text('📌 Check Status', 'cmd_status').row();
-    kb.text('📚 Course Modules', 'cmd_modules').row();
-    kb.text('📜 My History', 'cmd_history');
-    kb.text('❓ Help / Support', 'cmd_help');
-  }
-
-  return kb;
 }
 
 function getTransferKeyboard(userId, topicId) {
