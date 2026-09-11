@@ -271,7 +271,6 @@ function getModuleDepartmentKeyboard() {
     .text("🔙 Cancel", "moddept_cancel");
 }
 
-// SEPARATE DELETE MODULE DEPARTMENT KEYBOARD (Uses 'delmoddept_')
 function getDeleteModuleDepartmentKeyboard() {
   return new InlineKeyboard()
     .text("📈 Marketing", "delmoddept_Marketing Management")
@@ -280,8 +279,10 @@ function getDeleteModuleDepartmentKeyboard() {
     .text("🌾 Agribusiness & VCM", "delmoddept_Agribusiness and Value chain management").row()
     .text("📚 Ed. Planning & Mgmt", "delmoddept_Educational planning and management").row()
     .text("🚚 Logistics & SCM", "delmoddept_Logistics and Supply chain management").row()
-    .
-    function getApprovedRosterKeyboard() {
+    .text("🔙 Cancel", "delmoddept_cancel");
+}
+
+function getApprovedRosterKeyboard() {
   return new InlineKeyboard()
     .text("🌐 Every Student (All Departments)", "roster_all").row()
     .text("📈 Marketing", "roster_Marketing Management")
@@ -886,20 +887,16 @@ bot.callbackQuery('cmd_delete_module', async (ctx) => {
   const authorized = await isStaff(ctx);
   if (!authorized) return;
 
+  // This ensures it doesn't wait for a PDF upload
   await clearStaffPendingModuleDept(ctx.from.id);
-
-  const kb = new InlineKeyboard()
-    .text("📈 Marketing", "delmoddept_Marketing Management")
-    .text("💼 Business", "delmoddept_Business Management").row()
-    .text("📊 Accounting & Finance", "delmoddept_Accounting and finance").row()
-    .text("🌾 Agribusiness & VCM", "delmoddept_Agribusiness and Value chain management").row()
-    .text("📚 Ed. Planning & Mgmt", "delmoddept_Educational planning and management").row()
-    .text("🚚 Logistics & SCM", "delmoddept_Logistics and Supply chain management").row()
-    .text("🔙 Cancel", "delmoddept_cancel");
 
   await ctx.reply(
     "🗑 **Delete Course Module**\n\nSelect the academic department to view and remove modules:",
-    { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'Markdown', reply_markup: kb }
+    { 
+      message_thread_id: ctx.callbackQuery.message.message_thread_id, 
+      parse_mode: 'Markdown', 
+      reply_markup: getDeleteModuleDepartmentKeyboard() 
+    }
   );
 });
 
