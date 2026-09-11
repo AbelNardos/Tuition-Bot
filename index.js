@@ -1333,8 +1333,8 @@ bot.command(['module', 'uploadmodule'], async (ctx) => {
     const vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
     const vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, {
       message_thread_id: vaultTopicId,
-      caption: `📚 **COURSE MODULE ARCHIVE**\n• Department: ${dept}\n• Title: ${title}`,
-      parse_mode: 'Markdown'
+      caption: `📚 <b>COURSE MODULE ARCHIVE</b>\n• Department: ${escapeHtml(dept)}\n• Title: ${escapeHtml(title)}`,
+      parse_mode: 'HTML'
     });
 
     const insRes = await pool.query("INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4) RETURNING id", [dept, title, vaultMsg.document.file_id, doc.file_name || `${title}.pdf`]);
@@ -1348,7 +1348,7 @@ bot.command(['module', 'uploadmodule'], async (ctx) => {
     }
 
     const notifyKb = new InlineKeyboard().text("📢 Notify Enrolled Students", `notify_mod_${newModId}`).row().text("🔕 Silent Upload", "dismiss_mod_notify");
-    await ctx.reply(`✅ **Module Stashed in Vault!**\n• Department: ${dept}\n• Title: ${title}\n\nBroadcast to enrolled students?`, { reply_markup: notifyKb });
+    await ctx.reply(`✅ <b>Module Stashed in Vault!</b>\n• Department: ${escapeHtml(dept)}\n• Title: ${escapeHtml(title)}\n\nBroadcast to enrolled students?`, { parse_mode: 'HTML', reply_markup: notifyKb });
   } catch (err) {
     ctx.reply(`❌ Failed: ${err.message}`);
   }
@@ -1416,21 +1416,19 @@ bot.on('message', async (ctx) => {
   if (isStaffGroup && staffDept && ctx.message.document) {
     const doc = ctx.message.document;
     const moduleTitle = doc.file_name ? doc.file_name.replace(/\.pdf$/i, '') : 'Course Module';
-    const staffUploader = ctx.from.username ? `@${ctx.from.username}` : `${ctx.from.first_name || 'Staff'}`;
-
     try {
       const vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
       const vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, {
         message_thread_id: vaultTopicId,
-        caption: `📚 **COURSE MODULE ARCHIVE**\n• Department: ${staffDept}\n• Title: ${moduleTitle}\n• Uploaded by: ${staffUploader}`,
-        parse_mode: 'Markdown'
+        caption: `📚 <b>COURSE MODULE ARCHIVE</b>\n• Department: ${escapeHtml(staffDept)}\n• Title: ${escapeHtml(moduleTitle)}`,
+        parse_mode: 'HTML'
       });
       const insRes = await pool.query("INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4) RETURNING id", [staffDept, moduleTitle, vaultMsg.document.file_id, doc.file_name || `${moduleTitle}.pdf`]);
       await clearStaffPendingModuleDept(ctx.from.id);
-      try { await ctx.deleteMessage(); } catch (delErr) {}
+      try { await ctx.deleteMessage(); } catch (e) {}
 
       const notifyKb = new InlineKeyboard().text("📢 Notify Enrolled Students", `notify_mod_${insRes.rows[0].id}`).row().text("🔕 Silent Upload", "dismiss_mod_notify");
-      return ctx.reply(`✅ **Module Stashed in Vault!**\n• Department: ${staffDept}\n• Title: ${moduleTitle}\n\nNotify enrolled students now?`, { message_thread_id: topicId, reply_markup: notifyKb });
+      return ctx.reply(`✅ <b>Module Stashed in Vault!</b>\n• Department: ${escapeHtml(staffDept)}\n• Title: ${escapeHtml(moduleTitle)}\n\nNotify enrolled students now?`, { message_thread_id: topicId, parse_mode: 'HTML', reply_markup: notifyKb });
     } catch (err) {
       return ctx.reply(`❌ Upload error: ${err.message}`, { message_thread_id: topicId });
     }
