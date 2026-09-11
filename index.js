@@ -674,8 +674,8 @@ bot.command('bind', async (ctx) => {
   );
 });
 
-bot.command(['start', 'panel'], async (ctx) => {
-  // LIVE QR CODE VERIFICATION CHECK (Scanned from PDF)
+// STUDENT /start (WITH LIVE QR VERIFICATION SCANNER)
+bot.command('start', async (ctx) => {
   if (ctx.match && typeof ctx.match === 'string' && ctx.match.startsWith('verify_')) {
     const verifyId = ctx.match.replace('verify_', '').trim();
     const check = await pool.query(
@@ -701,23 +701,7 @@ bot.command(['start', 'panel'], async (ctx) => {
     }
   }
 
-  const staffGroupId = await getActiveStaffGroupId();
-  const isStaffGroup = String(ctx.chat.id) === staffGroupId;
-  const isPrivate = ctx.chat.type === 'private';
-
-  if (isStaffGroup) {
-    const topicId = ctx.message.message_thread_id;
-    return ctx.reply(
-      "⚙️ **RENAISSANCE GLOBAL — STAFF ACTION PANEL**\n\nSelect an action below:",
-      {
-        message_thread_id: topicId,
-        parse_mode: 'Markdown',
-        reply_markup: getStaffKeyboard()
-      }
-    );
-  }
-
-  if (isPrivate) {
+  if (ctx.chat.type === 'private') {
     const userId = ctx.from.id;
     await clearPendingDepartment(userId);
 
@@ -730,6 +714,32 @@ bot.command(['start', 'panel'], async (ctx) => {
       { parse_mode: 'Markdown', reply_markup: langKeyboard }
     );
   }
+});
+
+// UNIVERSAL STAFF /panel (WORKS IN BOTH SUPERGROUP & PRIVATE DM)
+bot.command('panel', async (ctx) => {
+  const authorized = await isStaff(ctx);
+
+  if (!authorized && ctx.chat.type !== 'private') return;
+
+  if (authorized) {
+    const topicId = ctx.message?.message_thread_id;
+    return ctx.reply(
+      "⚙️ **RENAISSANCE GLOBAL — STAFF ACTION PANEL**\n\nSelect an action below:",
+      {
+        message_thread_id: topicId,
+        parse_mode: 'Markdown',
+        reply_markup: getStaffKeyboard()
+      }
+    );
+  }
+
+  const userId = ctx.from.id;
+  const lang = await getUserLang(userId);
+  await ctx.reply(
+    STRINGS[lang].portalWelcome,
+    { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) }
+  );
 });
 // /revoke COMMAND & PANEL HANDLERS (REVERSES ACCIDENTAL APPROVALS)
 async function executeRevoke(ctx, targetUserId, topicId) {
@@ -1479,16 +1489,18 @@ bot.on('message', async (ctx) => {
   if (isStaffGroup && staffDept && ctx.message.document) {
     const doc = ctx.message.document;
     const moduleTitle = doc.file_name ? doc.file_name.replace(/\.pdf$/i, '') : 'Course Module';
+    const staffUploader = ctx.from.username ? `@${ctx.from.username}` : `${ctx.from.first_name || 'Staff'}`;
+
     try {
       const vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
       const vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, {
         message_thread_id: vaultTopicId,
-        caption: `📚 **COURSE MODULE ARCHIVE**\n• Department: ${staffDept}\n• Title: ${moduleTitle}`,
+        caption: `📚 **COURSE MODULE ARCHIVE**\n• Department: ${staffDept}\n• Title: ${moduleTitle}\n• Uploaded by: ${staffUploader}`,
         parse_mode: 'Markdown'
       });
       const insRes = await pool.query("INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4) RETURNING id", [staffDept, moduleTitle, vaultMsg.document.file_id, doc.file_name || `${moduleTitle}.pdf`]);
       await clearStaffPendingModuleDept(ctx.from.id);
-      try { await ctx.deleteMessage(); } catch (e) {}
+      try { await ctx.deleteMessage(); } catch (delErr) {}
 
       const notifyKb = new InlineKeyboard().text("📢 Notify Enrolled Students", `notify_mod_${insRes.rows[0].id}`).row().text("🔕 Silent Upload", "dismiss_mod_notify");
       return ctx.reply(`✅ **Module Stashed in Vault!**\n• Department: ${staffDept}\n• Title: ${moduleTitle}\n\nNotify enrolled students now?`, { message_thread_id: topicId, reply_markup: notifyKb });
@@ -1608,16 +1620,18 @@ async function main() {
     await bot.api.deleteMyCommands();
     await bot.api.deleteMyCommands({ scope: { type: 'all_private_chats' } });
     await bot.api.deleteMyCommands({ scope: { type: 'all_group_chats' } });
+    await bot.api.deleteMyCommands({ scope: { type: 'all_chat_administrators' } });
 
+    // Students only see /start
     await bot.api.setMyCommands([
-      { command: 'start', description: 'Start payment receipt submission' },
-      { command: 'panel', description: 'Open interactive action panel' },
-      { command: 'bind', description: 'Bind current group as staff panel (Admins only)' },
-      { command: 'changedept', description: 'Change approved student department (Staff only)' },
-      { command: 'deletemodule', description: 'Delete course module from database (Staff only)' },
-      { command: 'approved', description: 'View approved students directory (Staff only)' },
-      { command: 'revoke', description: 'Revoke approved tuition payment (Staff only)' }
-    ]);
+      { command: 'start', description: 'Open Student Portal & Submit Receipt' }
+    ], { scope: { type: 'all_private_chats' } });
+
+    // Staff/Admins only see /panel and /bind in group
+    await bot.api.setMyCommands([
+      { command: 'panel', description: 'Open Staff Command Center Dashboard' },
+      { command: 'bind', description: 'Bind group as active staff panel' }
+    ], { scope: { type: 'all_chat_administrators' } });
   } catch (cmdErr) {}
 
   const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL; 
