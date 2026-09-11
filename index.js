@@ -45,13 +45,20 @@ const pool = new Pool({
 
 function escapeHtml(str) {
   if (!str) return '';
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 async function initDB() {
   try {
-    await pool.query(`ALTER TABLE department_topics DROP CONSTRAINT IF EXISTS department_topics_pkey;`);
-  } catch (err) {}
+    await pool.query(`
+      ALTER TABLE department_topics DROP CONSTRAINT IF EXISTS department_topics_pkey;
+    `);
+  } catch (err) {
+    console.error("Error dropping old constraint:", err);
+  }
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS group_settings (
@@ -130,16 +137,24 @@ async function initDB() {
 async function getActiveStaffGroupId() {
   try {
     const res = await pool.query('SELECT group_id FROM group_settings WHERE is_active = TRUE ORDER BY updated_at DESC LIMIT 1');
-    if (res.rows.length > 0) return res.rows[0].group_id;
-  } catch (err) {}
+    if (res.rows.length > 0) {
+      return res.rows[0].group_id;
+    }
+  } catch (err) {
+    console.error("Error fetching active staff group ID:", err);
+  }
   return String(process.env.STAFF_GROUP_ID || '').trim();
 }
 
 async function getUserLang(userId) {
   try {
     const res = await pool.query('SELECT language FROM user_settings WHERE user_id = $1', [userId]);
-    if (res.rows.length > 0 && res.rows[0].language) return res.rows[0].language;
-  } catch (err) {}
+    if (res.rows.length > 0 && res.rows[0].language) {
+      return res.rows[0].language;
+    }
+  } catch (err) {
+    console.error("Error fetching user language:", err);
+  }
   return 'en';
 }
 
@@ -149,14 +164,20 @@ async function setUserLang(userId, lang) {
       INSERT INTO user_settings (user_id, language) VALUES ($1, $2)
       ON CONFLICT (user_id) DO UPDATE SET language = $2
     `, [userId, lang]);
-  } catch (err) {}
+  } catch (err) {
+    console.error("Error setting user language:", err);
+  }
 }
 
 async function getPendingDepartment(userId) {
   try {
     const res = await pool.query('SELECT pending_department FROM user_settings WHERE user_id = $1', [userId]);
-    if (res.rows.length > 0) return res.rows[0].pending_department;
-  } catch (err) {}
+    if (res.rows.length > 0) {
+      return res.rows[0].pending_department;
+    }
+  } catch (err) {
+    console.error("Error fetching pending department:", err);
+  }
   return null;
 }
 
@@ -165,21 +186,28 @@ async function setPendingDepartment(userId, dept) {
     await pool.query(`
       INSERT INTO user_settings (user_id, pending_department) 
       VALUES ($1, $2)
-      ON CONFLICT (user_id) DO UPDATE SET pending_department = $2
+      ON CONFLICT (user_id) 
+      DO UPDATE SET pending_department = $2
     `, [userId, dept]);
-  } catch (err) {}
+  } catch (err) {
+    console.error("Error setting pending department:", err);
+  }
 }
 
 async function clearPendingDepartment(userId) {
   try {
     await pool.query('UPDATE user_settings SET pending_department = NULL WHERE user_id = $1', [userId]);
-  } catch (err) {}
+  } catch (err) {
+    console.error("Error clearing pending department:", err);
+  }
 }
 
 async function getStaffPendingModuleDept(userId) {
   try {
     const res = await pool.query('SELECT pending_module_dept FROM user_settings WHERE user_id = $1', [userId]);
-    if (res.rows.length > 0) return res.rows[0].pending_module_dept;
+    if (res.rows.length > 0) {
+      return res.rows[0].pending_module_dept;
+    }
   } catch (err) {}
   return null;
 }
@@ -189,7 +217,8 @@ async function setStaffPendingModuleDept(userId, dept) {
     await pool.query(`
       INSERT INTO user_settings (user_id, pending_module_dept) 
       VALUES ($1, $2)
-      ON CONFLICT (user_id) DO UPDATE SET pending_module_dept = $2
+      ON CONFLICT (user_id) 
+      DO UPDATE SET pending_module_dept = $2
     `, [userId, dept]);
   } catch (err) {}
 }
@@ -306,16 +335,19 @@ function getDepartmentKeyboard(planType = 'reg') {
     .text("🚚 Logistics & SCM", `${prefix}Logistics and Supply chain management`);
 }
 
+// 10-BUTTON INTERACTIVE STAFF COMMAND CENTER (5 ROWS OF 2 BUTTONS)
 function getStaffKeyboard() {
   return new InlineKeyboard()
     .text('🔍 Search Record', 'cmd_lookfor')
-    .text('📊 Statistics', 'cmd_stats').row()
-    .text('📄 Export CSV', 'cmd_export')
-    .text('📢 Broadcast', 'cmd_broadcast').row()
+    .text('👥 Approved Roster', 'cmd_approved_roster').row()
     .text('📚 Upload Module', 'cmd_upload_module')
     .text('🗑 Delete Module', 'cmd_delete_module').row()
-    .text('📈 Module Analytics', 'cmd_mod_analytics')
-    .text('👥 Approved Students', 'cmd_approved_roster');
+    .text('🔄 Change Dept', 'cmd_panel_changedept')
+    .text('⚠️ Revoke Approval', 'cmd_panel_revoke').row()
+    .text('📊 Stats Summary', 'cmd_stats')
+    .text('📈 Module Analytics', 'cmd_mod_analytics').row()
+    .text('📄 Export CSV', 'cmd_export')
+    .text('📢 Broadcast Alert', 'cmd_broadcast');
 }
 
 function getModuleDepartmentKeyboard() {
@@ -391,7 +423,6 @@ function getRejectionReasonKeyboard(userId, topicId) {
   });
   return kb;
 }
-
 // GENERATE APPROVAL PDF WITH EMBEDDED LIVE VERIFICATION QR CODE
 async function generateApprovalPDF(userId, username, department, staffName, botUsername) {
   return new Promise(async (resolve, reject) => {
@@ -402,18 +433,18 @@ async function generateApprovalPDF(userId, username, department, staffName, botU
 
       doc.pipe(stream);
 
-      // Title & Header
+      // Header
       doc.fontSize(20).text('RENAISSANCE GLOBAL', { align: 'center' });
       doc.fontSize(14).text('Official Tuition Payment Approval Slip', { align: 'center' });
       doc.moveDown(2);
 
-      // Generate verification QR code
+      // Verification QR Code
       const qrData = botUsername 
         ? `https://t.me/${botUsername}?start=verify_${userId}`
         : `RENAISSANCE_GLOBAL_VERIFY:${userId}`;
       const qrBuffer = await QRCode.toBuffer(qrData, { width: 100, margin: 1 });
 
-      // Embed QR code on top-right
+      // Embed QR Code
       doc.image(qrBuffer, 440, 110, { width: 95 });
       doc.fontSize(8).text('Scan with camera to verify live clearance', 430, 210, { width: 115, align: 'center' });
 
@@ -440,29 +471,30 @@ async function generateApprovalPDF(userId, username, department, staffName, botU
 }
 
 bot.catch((err) => console.error('Error in bot framework:', err));
+
 async function getOrCreateDepartmentTopic(ctx, departmentName, targetGroupId) {
-  const baseDepartment = departmentName.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
+  const baseDept = departmentName.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
 
   const cached = await pool.query(
     'SELECT topic_id FROM department_topics WHERE group_id = $1 AND department = $2 LIMIT 1',
-    [targetGroupId, baseDepartment]
+    [targetGroupId, baseDept]
   );
 
   if (cached.rows.length > 0) {
     return Number(cached.rows[0].topic_id);
   }
 
-  const newTopic = await ctx.api.createForumTopic(targetGroupId, `📁 [${baseDepartment}]`);
+  const newTopic = await ctx.api.createForumTopic(targetGroupId, `📁 [${baseDept}]`);
   const topicId = newTopic.message_thread_id;
 
   await pool.query(
     'DELETE FROM department_topics WHERE group_id = $1 AND department = $2',
-    [targetGroupId, baseDepartment]
+    [targetGroupId, baseDept]
   );
 
   await pool.query(
     'INSERT INTO department_topics (group_id, department, topic_id) VALUES ($1, $2, $3)',
-    [targetGroupId, baseDepartment, topicId]
+    [targetGroupId, baseDept, topicId]
   );
 
   return topicId;
@@ -643,7 +675,7 @@ bot.command('bind', async (ctx) => {
 });
 
 bot.command(['start', 'panel'], async (ctx) => {
-  // LIVE QR CODE VERIFICATION CHECK (When scanned via camera)
+  // LIVE QR CODE VERIFICATION CHECK (Scanned from PDF)
   if (ctx.match && typeof ctx.match === 'string' && ctx.match.startsWith('verify_')) {
     const verifyId = ctx.match.replace('verify_', '').trim();
     const check = await pool.query(
@@ -658,7 +690,7 @@ bot.command(['start', 'panel'], async (ctx) => {
     const rec = check.rows[0];
     if (rec.status === 'APPROVED') {
       return ctx.reply(
-        `✅ **OFFICIAL VERIFICATION: VALID SLIP**\n\n• **Student ID:** \`${verifyId}\`\n• **Department:** ${rec.department}\n• **Status:** APPROVED & CLEARED\n• **Clearance Date:** ${new Date(rec.updated_at).toLocaleDateString()}\n\n_This student is officially cleared for campus entry and examinations._`,
+        `✅ **OFFICIAL TUITION CLEARANCE: VALID**\n\n• **Student ID:** \`${verifyId}\`\n• **Department:** ${rec.department}\n• **Status:** APPROVED & CLEARED\n• **Clearance Date:** ${new Date(rec.updated_at).toLocaleDateString()}\n\n_This student is officially cleared for campus entry and examinations._`,
         { parse_mode: 'Markdown' }
       );
     } else {
@@ -699,28 +731,8 @@ bot.command(['start', 'panel'], async (ctx) => {
     );
   }
 });
-
-// /revoke COMMAND (REVERSES ACCIDENTAL APPROVALS)
-bot.command('revoke', async (ctx) => {
-  const authorized = await isStaff(ctx);
-  if (!authorized) return;
-
-  const topicId = ctx.message.message_thread_id;
-  let targetIdStr = ctx.message.text.replace(/^\/revoke/, '').trim();
-
-  if (!targetIdStr && ctx.message.reply_to_message && ctx.message.reply_to_message.text) {
-    const match = ctx.message.reply_to_message.text.match(/Student ID:\s*`?(\d+)`?/i);
-    if (match) targetIdStr = match[1];
-  }
-
-  const targetUserId = Number(targetIdStr);
-  if (!targetUserId) {
-    return ctx.reply(
-      "⚠️ **How to use:**\nType: `/revoke <StudentID>`\n*Example:* `/revoke 123456789`\n\n*(Or reply directly to any approved message with `/revoke`)*",
-      { message_thread_id: topicId, parse_mode: 'Markdown' }
-    );
-  }
-
+// /revoke COMMAND & PANEL HANDLERS (REVERSES ACCIDENTAL APPROVALS)
+async function executeRevoke(ctx, targetUserId, topicId) {
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `Staff`;
 
   const updateRes = await pool.query(
@@ -763,15 +775,14 @@ bot.command('revoke', async (ctx) => {
     `✅ **Approval Revoked Successfully!**\n\n• **Student ID:** \`${targetUserId}\`\n• **Department:** ${department}\n• **Revoked by:** ${staffName}\n\n_Student has been notified, modules are re-locked, and any camera scan of their old PDF slip will now report VOID._`,
     { message_thread_id: topicId, parse_mode: 'Markdown' }
   );
-});
+}
 
-// TYPO-PROOF /changedept COMMAND
-bot.command(['changedept', 'changedep'], async (ctx) => {
+bot.command('revoke', async (ctx) => {
   const authorized = await isStaff(ctx);
   if (!authorized) return;
 
   const topicId = ctx.message.message_thread_id;
-  let targetIdStr = ctx.message.text.replace(/^\/(changedept|changedep)/, '').trim();
+  let targetIdStr = ctx.message.text.replace(/^\/revoke/, '').trim();
 
   if (!targetIdStr && ctx.message.reply_to_message && ctx.message.reply_to_message.text) {
     const match = ctx.message.reply_to_message.text.match(/Student ID:\s*`?(\d+)`?/i);
@@ -781,13 +792,32 @@ bot.command(['changedept', 'changedep'], async (ctx) => {
   const targetUserId = Number(targetIdStr);
   if (!targetUserId) {
     return ctx.reply(
-      "⚠️ **How to use:**\nType: `/changedept <StudentID>`\n*Example:* `/changedept 123456789`\n\n*(Or reply directly to the student's approval slip with `/changedept`)*",
+      "⚠️ **How to use:**\nType: `/revoke <StudentID>`\n*Example:* `/revoke 123456789`\n\n*(Or reply directly to any approved message with `/revoke`)*",
       { message_thread_id: topicId, parse_mode: 'Markdown' }
     );
   }
 
+  await executeRevoke(ctx, targetUserId, topicId);
+});
+
+bot.callbackQuery('cmd_panel_revoke', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (!(await isStaff(ctx))) return;
+
+  await ctx.reply(
+    "⚠️ **Revoke Student Approval**\n\nReply directly to this message with the **Student ID** you want to revoke.",
+    {
+      message_thread_id: ctx.callbackQuery.message.message_thread_id,
+      parse_mode: 'Markdown',
+      reply_markup: { force_reply: true }
+    }
+  );
+});
+
+// /changedept COMMAND & PANEL HANDLERS (TYPO-PROOF)
+async function executeChangeDeptPrompt(ctx, targetUserId, topicId) {
   const res = await pool.query(
-    "SELECT id, username, department FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1",
+    "SELECT username, department FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1",
     [targetUserId]
   );
 
@@ -809,6 +839,43 @@ bot.command(['changedept', 'changedep'], async (ctx) => {
   await ctx.reply(
     `🔄 **Change Academic Placement**\n\n• **Student ID:** \`${targetUserId}\`\n• **Username:** @${username || 'N/A'}\n• **Current Dept:** ${department}\n\nSelect the new department below:`,
     { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: kb }
+  );
+}
+
+bot.command(['changedept', 'changedep'], async (ctx) => {
+  const authorized = await isStaff(ctx);
+  if (!authorized) return;
+
+  const topicId = ctx.message.message_thread_id;
+  let targetIdStr = ctx.message.text.replace(/^\/(changedept|changedep)/, '').trim();
+
+  if (!targetIdStr && ctx.message.reply_to_message && ctx.message.reply_to_message.text) {
+    const match = ctx.message.reply_to_message.text.match(/Student ID:\s*`?(\d+)`?/i);
+    if (match) targetIdStr = match[1];
+  }
+
+  const targetUserId = Number(targetIdStr);
+  if (!targetUserId) {
+    return ctx.reply(
+      "⚠️ **How to use:**\nType: `/changedept <StudentID>`\n*Example:* `/changedept 123456789`\n\n*(Or reply directly to the student's approval slip with `/changedept`)*",
+      { message_thread_id: topicId, parse_mode: 'Markdown' }
+    );
+  }
+
+  await executeChangeDeptPrompt(ctx, targetUserId, topicId);
+});
+
+bot.callbackQuery('cmd_panel_changedept', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (!(await isStaff(ctx))) return;
+
+  await ctx.reply(
+    "🔄 **Change Student Placement**\n\nReply directly to this message with the **Student ID** to change their academic department.",
+    {
+      message_thread_id: ctx.callbackQuery.message.message_thread_id,
+      parse_mode: 'Markdown',
+      reply_markup: { force_reply: true }
+    }
   );
 });
 
@@ -874,18 +941,20 @@ bot.command(['deletemodule', 'delmod'], async (ctx) => {
 
   const topicId = ctx.message.message_thread_id;
 
-  const kb = new InlineKeyboard()
-    .text("📈 Marketing", "delmoddept_Marketing Management")
-    .text("💼 Business", "delmoddept_Business Management").row()
-    .text("📊 Accounting & Finance", "delmoddept_Accounting and finance").row()
-    .text("🌾 Agribusiness & VCM", "delmoddept_Agribusiness and Value chain management").row()
-    .text("📚 Ed. Planning & Mgmt", "delmoddept_Educational planning and management").row()
-    .text("🚚 Logistics & SCM", "delmoddept_Logistics and Supply chain management").row()
-    .text("🔙 Cancel", "delmoddept_cancel");
+  await ctx.reply(
+    "🗑 **Delete Course Module**\n\nSelect the academic department to view and remove modules:",
+    { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: getModuleDepartmentKeyboard() }
+  );
+});
+
+bot.callbackQuery('cmd_delete_module', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const authorized = await isStaff(ctx);
+  if (!authorized) return;
 
   await ctx.reply(
     "🗑 **Delete Course Module**\n\nSelect the academic department to view and remove modules:",
-    { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: kb }
+    { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'Markdown', reply_markup: getModuleDepartmentKeyboard() }
   );
 });
 
@@ -939,7 +1008,7 @@ bot.callbackQuery(/^confirm_delmod_(\d+)$/, async (ctx) => {
   );
 });
 
-// APPROVED STUDENTS DIRECTORY ROSTER (WITH HTML PARSE MODE FIX)
+// APPROVED STUDENTS DIRECTORY ROSTER (HTML-SAFE WITH ALL DEPARTMENTS OPTION)
 bot.command(['approved', 'students'], async (ctx) => {
   const authorized = await isStaff(ctx);
   if (!authorized) return;
@@ -1038,10 +1107,8 @@ bot.callbackQuery(/^notify_mod_(\d+)$/, async (ctx) => {
   if (!(await isStaff(ctx))) return;
 
   const moduleId = Number(ctx.match[1]);
-  const modRes = await pool.query('SELECT title, department, file_id FROM department_modules WHERE id = $1', [moduleId]);
-  if (modRes.rows.length === 0) {
-    return ctx.editMessageText("⚠️ Module no longer exists or was removed.");
-  }
+  const modRes = await pool.query('SELECT title, department FROM department_modules WHERE id = $1', [moduleId]);
+  if (modRes.rows.length === 0) return ctx.editMessageText("⚠️ Module no longer exists.");
 
   const { title, department } = modRes.rows[0];
   const cleanDept = department.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
@@ -1052,17 +1119,15 @@ bot.callbackQuery(/^notify_mod_(\d+)$/, async (ctx) => {
   );
 
   const students = studentsRes.rows;
-  if (students.length === 0) {
-    return ctx.editMessageText(`ℹ️ No approved students enrolled in **${cleanDept}** to notify.`);
-  }
+  if (students.length === 0) return ctx.editMessageText(`ℹ️ No approved students enrolled in **${cleanDept}** to notify.`);
 
   let sentCount = 0;
   for (const s of students) {
     try {
       const sLang = await getUserLang(s.user_id);
       const notifText = sLang === 'am'
-        ? `📚 **አዲስ የትምህርት ሞጁል ተጭኗል!**\n\n• **ክፍል:** ${cleanDept}\n• **ሞጁል:** ${title}\n\nከታች ያለውን ቁልፍ በመጫን ወዲያውኑ ማውረድ ይችላሉ፡`
-        : `📚 **NEW COURSE MODULE AVAILABLE**\n\n• **Department:** ${cleanDept}\n• **Module:** ${title}\n\nTap below to download directly to your chat:`;
+        ? `📚 **አዲስ የትምህርት ሞጁል ተጭኗል!**\n\n• **ክፍል:** ${cleanDept}\n• **ሞጁል:** ${title}\n\nከታች ያለውን ቁልፍ በመጫን ማውረድ ይችላሉ፡`
+        : `📚 **NEW COURSE MODULE AVAILABLE**\n\n• **Department:** ${cleanDept}\n• **Module:** ${title}\n\nTap below to download:`;
 
       const dlKb = new InlineKeyboard().text(sLang === 'am' ? "⬇️ አውርድ (Download)" : "⬇️ Download Module", `dlmod_${moduleId}`);
       await bot.api.sendMessage(s.user_id, notifText, { parse_mode: 'Markdown', reply_markup: dlKb });
@@ -1070,10 +1135,7 @@ bot.callbackQuery(/^notify_mod_(\d+)$/, async (ctx) => {
     } catch (e) {}
   }
 
-  await ctx.editMessageText(
-    `📢 **Notification Broadcast Complete!**\n\n• **Module:** ${title}\n• **Department:** ${cleanDept}\n• **Delivered to:** ${sentCount} / ${students.length} approved students.`,
-    { parse_mode: 'Markdown' }
-  );
+  await ctx.editMessageText(`📢 **Broadcast Complete!**\n\n• **Module:** ${title}\n• **Department:** ${cleanDept}\n• **Delivered to:** ${sentCount}/${students.length} students.`, { parse_mode: 'Markdown' });
 });
 
 bot.callbackQuery('dismiss_mod_notify', async (ctx) => {
@@ -1086,22 +1148,13 @@ bot.callbackQuery('cmd_mod_analytics', async (ctx) => {
   if (!(await isStaff(ctx))) return;
 
   const topicId = ctx.callbackQuery.message.message_thread_id;
-
   const res = await pool.query(`
-    SELECT 
-      m.id, 
-      m.title, 
-      m.department,
-      COUNT(DISTINCT d.user_id) AS total_downloads
-    FROM department_modules m
-    LEFT JOIN module_downloads d ON m.id = d.module_id
-    GROUP BY m.id, m.title, m.department
-    ORDER BY m.department ASC, total_downloads DESC
+    SELECT m.id, m.title, m.department, COUNT(DISTINCT d.user_id) AS total_downloads
+    FROM department_modules m LEFT JOIN module_downloads d ON m.id = d.module_id
+    GROUP BY m.id, m.title, m.department ORDER BY m.department ASC, total_downloads DESC
   `);
 
-  if (res.rows.length === 0) {
-    return ctx.reply("📊 **Module Analytics:** No modules uploaded yet.", { message_thread_id: topicId });
-  }
+  if (res.rows.length === 0) return ctx.reply("📊 **Module Analytics:** No modules uploaded yet.", { message_thread_id: topicId });
 
   let text = "📈 **COURSE MODULE ENGAGEMENT ANALYTICS**\n\n";
   let currentDept = "";
@@ -1111,16 +1164,11 @@ bot.callbackQuery('cmd_mod_analytics', async (ctx) => {
       currentDept = row.department;
       text += `\n📁 **${currentDept}**\n`;
     }
-
     const cleanDept = currentDept.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
-    const enrolledRes = await pool.query(
-      "SELECT COUNT(DISTINCT user_id) as count FROM tickets WHERE status = 'APPROVED' AND department ILIKE $1",
-      [`%${cleanDept}%`]
-    );
+    const enrolledRes = await pool.query("SELECT COUNT(DISTINCT user_id) as count FROM tickets WHERE status = 'APPROVED' AND department ILIKE $1", [`%${cleanDept}%`]);
     const totalEnrolled = Number(enrolledRes.rows[0].count) || 0;
     const downloads = Number(row.total_downloads);
     const percentage = totalEnrolled > 0 ? Math.round((downloads / totalEnrolled) * 100) : 0;
-
     text += `• **${row.title}**\n  ↳ Downloaded by: **${downloads}/${totalEnrolled} students** (${percentage}%)\n`;
   }
 
@@ -1130,166 +1178,92 @@ bot.callbackQuery('cmd_mod_analytics', async (ctx) => {
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const lang = ctx.match[1];
-  const userId = ctx.from.id;
-  await setUserLang(userId, lang);
-
-  const t = STRINGS[lang];
-
-  try {
-    await ctx.editMessageText(
-      t.portalWelcome,
-      { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) }
-    );
-  } catch (e) {}
+  await setUserLang(ctx.from.id, lang);
+  await ctx.editMessageText(STRINGS[lang].portalWelcome, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
 });
 
 bot.callbackQuery('cmd_lookfor', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  await ctx.reply(
-    "🔍 **Search Student Record**\n\nReply directly to this message with a **User ID**, **@username**, or **Department**.",
-    {
-      message_thread_id: ctx.callbackQuery.message.message_thread_id,
-      parse_mode: 'Markdown',
-      reply_markup: { force_reply: true }
-    }
-  );
+  await ctx.reply("🔍 **Search Student Record**\n\nReply directly with a **User ID**, **@username**, or **Department**.", {
+    message_thread_id: ctx.callbackQuery.message.message_thread_id,
+    parse_mode: 'Markdown',
+    reply_markup: { force_reply: true }
+  });
 });
 
 bot.callbackQuery('cmd_stats', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const topicId = ctx.callbackQuery.message.message_thread_id;
-  const appSummary = await generateSummaryText('APPROVED');
-  const rejSummary = await generateSummaryText('REJECTED');
-  await ctx.reply(`${appSummary}\n\n---\n\n${rejSummary}`, { message_thread_id: topicId, parse_mode: 'Markdown' });
+  const tId = ctx.callbackQuery.message.message_thread_id;
+  await ctx.reply(`${await generateSummaryText('APPROVED')}\n\n---\n\n${await generateSummaryText('REJECTED')}`, { message_thread_id: tId, parse_mode: 'Markdown' });
 });
 
 bot.callbackQuery('cmd_export', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const staffGroupId = await getActiveStaffGroupId();
-  const topicId = ctx.callbackQuery.message.message_thread_id;
-  await sendCSVExport(staffGroupId, topicId, "📄 **Receipt Audit Export**");
+  await sendCSVExport(await getActiveStaffGroupId(), ctx.callbackQuery.message.message_thread_id, "📄 **Receipt Audit Export**");
 });
 
 bot.callbackQuery('cmd_broadcast', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  await ctx.reply(
-    "📢 **Send Student Announcement**\n\nReply directly to this message with the exact announcement text you want to send to all registered students.",
-    {
-      message_thread_id: ctx.callbackQuery.message.message_thread_id,
-      parse_mode: 'Markdown',
-      reply_markup: { force_reply: true }
-    }
-  );
+  await ctx.reply("📢 **Send Announcement**\n\nReply directly with the announcement text to broadcast to all students.", {
+    message_thread_id: ctx.callbackQuery.message.message_thread_id,
+    parse_mode: 'Markdown',
+    reply_markup: { force_reply: true }
+  });
 });
 
 bot.callbackQuery('cmd_upload_module', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const authorized = await isStaff(ctx);
-  if (!authorized) return;
-
-  await ctx.reply(
-    "📚 **Upload Course Module**\n\nPlease select the department for this module:",
-    {
-      message_thread_id: ctx.callbackQuery.message.message_thread_id,
-      parse_mode: 'Markdown',
-      reply_markup: getModuleDepartmentKeyboard()
-    }
-  );
+  if (!(await isStaff(ctx))) return;
+  await ctx.reply("📚 **Upload Course Module**\n\nSelect academic department:", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'Markdown', reply_markup: getModuleDepartmentKeyboard() });
 });
 
 bot.callbackQuery('cmd_delete_module', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const authorized = await isStaff(ctx);
-  if (!authorized) return;
-
-  const kb = new InlineKeyboard()
-    .text("📈 Marketing", "delmoddept_Marketing Management")
-    .text("💼 Business", "delmoddept_Business Management").row()
-    .text("📊 Accounting & Finance", "delmoddept_Accounting and finance").row()
-    .text("🌾 Agribusiness & VCM", "delmoddept_Agribusiness and Value chain management").row()
-    .text("📚 Ed. Planning & Mgmt", "delmoddept_Educational planning and management").row()
-    .text("🚚 Logistics & SCM", "delmoddept_Logistics and Supply chain management").row()
-    .text("🔙 Cancel", "delmoddept_cancel");
-
-  await ctx.reply(
-    "🗑 **Delete Course Module**\n\nSelect the academic department to view and remove modules:",
-    { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'Markdown', reply_markup: kb }
-  );
+  if (!(await isStaff(ctx))) return;
+  await ctx.reply("🗑 **Delete Course Module**\n\nSelect academic department to remove modules from:", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'Markdown', reply_markup: getModuleDepartmentKeyboard() });
 });
 
 bot.callbackQuery(/^moddept_(.+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const dept = ctx.match[1];
-
   if (dept === 'cancel') {
     await clearStaffPendingModuleDept(ctx.from.id);
     return ctx.editMessageText("❌ Module upload cancelled.");
   }
-
   await setStaffPendingModuleDept(ctx.from.id, dept);
-
-  await ctx.editMessageText(
-    `✅ Selected Department:\n${dept}\n\nNow, simply send or forward the PDF document for this module.`
-  );
+  await ctx.editMessageText(`✅ Selected Department:\n${dept}\n\nNow, simply send or forward the PDF document for this module.`);
 });
 
 bot.callbackQuery('cmd_submit', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const userId = ctx.from.id;
-  const lang = await getUserLang(userId);
-  const t = STRINGS[lang];
-
-  await ctx.reply(
-    t.selectPlan,
-    { parse_mode: 'Markdown', reply_markup: getPaymentTypeKeyboard(lang) }
-  );
+  const lang = await getUserLang(ctx.from.id);
+  await ctx.reply(STRINGS[lang].selectPlan, { parse_mode: 'Markdown', reply_markup: getPaymentTypeKeyboard(lang) });
 });
 
 bot.callbackQuery('cmd_pending_info', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const userId = ctx.from.id;
-  const lang = await getUserLang(userId);
-  
+  const lang = await getUserLang(ctx.from.id);
   const msg = lang === 'am'
-    ? "⏳ **ማመልከቻዎ በግምገማ ላይ ነው**\n\nየላኩት ደረሰኝ በበላይ ኃላፊዎች በመታየት ላይ ስለሆነ በአሁኑ ወቅት አዲስ ደረሰኝ መላክ አይችሉም። ውሳኔ ሲሰጥበት ወዲያውኑ ማሳወቂያ ይደርስዎታል።"
-    : "⏳ **Submission Under Review**\n\nYour submitted receipt is currently being verified by finance staff. Submitting a new receipt is disabled until staff completes the review process.";
-
-  await ctx.reply(msg, { 
-    parse_mode: 'Markdown', 
-    reply_markup: getStudentKeyboard(lang, 'PENDING') 
-  });
+    ? "⏳ **ማመልከቻዎ በግምገማ ላይ ነው**\n\nየላኩት ደረሰኝ በመታየት ላይ ስለሆነ በአሁኑ ወቅት አዲስ ደረሰኝ መላክ አይችሉም።"
+    : "⏳ **Submission Under Review**\n\nYour receipt is currently being verified by staff. Submissions are disabled until review completes.";
+  await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, 'PENDING') });
 });
 
 bot.callbackQuery('cmd_download_pdf', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
-  const t = STRINGS[lang];
-
-  const res = await pool.query(
-    "SELECT department, username, processed_by FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1",
-    [userId]
-  );
-
-  if (res.rows.length === 0) {
-    return ctx.reply("⚠️ No approved receipt found for download.", { parse_mode: 'Markdown' });
-  }
+  const res = await pool.query("SELECT department, username, processed_by FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1", [userId]);
+  if (res.rows.length === 0) return ctx.reply("⚠️ No approved receipt found.");
 
   const { department, username, processed_by } = res.rows[0];
   const botUsername = ctx.me?.username;
-
   try {
     const pdfPath = await generateApprovalPDF(userId, username || 'N/A', department, processed_by || 'Finance Team', botUsername);
-    await ctx.replyWithDocument(
-      new InputFile(pdfPath, `Tuition_Approval_Slip_${userId}.pdf`),
-      { caption: t.approvedMsg, parse_mode: 'Markdown' }
-    );
-    if (fs.existsSync(pdfPath)) {
-      fs.unlinkSync(pdfPath);
-    }
+    await ctx.replyWithDocument(new InputFile(pdfPath, `Tuition_Approval_Slip_${userId}.pdf`), { caption: STRINGS[lang].approvedMsg, parse_mode: 'Markdown' });
+    if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
   } catch (err) {
-    console.error("Error generating requested PDF:", err);
-    await ctx.reply("❌ Unable to generate PDF slip. Please try again later.");
+    ctx.reply("❌ Unable to generate PDF slip.");
   }
 });
 
@@ -1299,147 +1273,65 @@ bot.callbackQuery('cmd_modules', async (ctx) => {
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
 
-  const checkApproval = await pool.query(
-    "SELECT department FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1",
-    [userId]
-  );
-
+  const checkApproval = await pool.query("SELECT department FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1", [userId]);
   if (checkApproval.rows.length === 0) {
     const notApprovedMsg = lang === 'am'
-      ? "🔒 **የሞጁል ማውረጃ ተቆልፏል**\n\nየትምህርት ሞጁሎችን ለማውረድ የክፍያ ደረሰኝዎ በገንዘብ ያዥ ቡድኑ መጽደቅ አለበት። እባክዎን መጀመሪያ ደረሰኝዎን ያስገቡ ወይም ውሳኔ እስኪያገኝ ይጠብቁ።"
-      : "🔒 **Modules Locked**\n\nCourse modules are only accessible to students with an **APPROVED** tuition payment. Please submit your payment receipt first or wait for staff verification.";
-    
-    return ctx.reply(notApprovedMsg, { 
-      parse_mode: 'Markdown',
-      reply_markup: getStudentKeyboard(lang, null)
-    });
+      ? "🔒 **የሞጁል ማውረጃ ተቆልፏል**\n\nሞጁሎችን ለማውረድ የክፍያ ደረሰኝዎ መጽደቅ አለበት።"
+      : "🔒 **Modules Locked**\n\nCourse modules are only accessible to students with an **APPROVED** tuition payment.";
+    return ctx.reply(notApprovedMsg, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
   }
 
-  const studentDept = checkApproval.rows[0].department
-    .replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '')
-    .trim();
-
-  const modulesRes = await pool.query(
-    "SELECT id, title FROM department_modules WHERE department ILIKE $1 ORDER BY id ASC",
-    [`%${studentDept}%`]
-  );
-
-  if (modulesRes.rows.length === 0) {
-    const noModulesMsg = lang === 'am'
-      ? `📚 **ትምህርት ክፍል:** ${studentDept}\n\nለዚህ ክፍል እስካሁን የተጫነ ሞጁል የለም። በቅርቡ ይጫናል።`
-      : `📚 **Department:** ${studentDept}\n\nNo modules uploaded for this department yet. Please check back later.`;
-    
-    return ctx.reply(noModulesMsg, { parse_mode: 'Markdown' });
-  }
+  const studentDept = checkApproval.rows[0].department.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
+  const modulesRes = await pool.query("SELECT id, title FROM department_modules WHERE department ILIKE $1 ORDER BY id ASC", [`%${studentDept}%`]);
+  if (modulesRes.rows.length === 0) return ctx.reply(`📚 No modules uploaded for **${studentDept}** yet.`);
 
   const kb = new InlineKeyboard();
-  modulesRes.rows.forEach((m) => {
-    kb.text(`📄 ${m.title}`, `dlmod_${m.id}`).row();
-  });
-
-  const headerMsg = lang === 'am'
-    ? `📚 **የትምህርት ክፍል ሞጁሎች (${studentDept})**\n\nለማውረድ የሚፈልጉትን ሞጁል ይምረጡ፡`
-    : `📚 **Course Modules (${studentDept})**\n\nSelect a module below to download:`;
-
-  await ctx.reply(headerMsg, { parse_mode: 'Markdown', reply_markup: kb });
+  modulesRes.rows.forEach((m) => kb.text(`📄 ${m.title}`, `dlmod_${m.id}`).row());
+  await ctx.reply(`📚 **Course Modules (${studentDept})**\n\nSelect a module below to download:`, { parse_mode: 'Markdown', reply_markup: kb });
 });
 
 bot.callbackQuery(/^dlmod_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const moduleId = Number(ctx.match[1]);
-
-  const res = await pool.query("SELECT title, file_id, file_name FROM department_modules WHERE id = $1", [moduleId]);
-  if (res.rows.length === 0) {
-    return ctx.reply("⚠️ Module not found or removed.");
-  }
-
-  const mod = res.rows[0];
-
-  // Log unique student download for analytics
-  try {
-    await pool.query(`
-      INSERT INTO module_downloads (module_id, user_id)
-      VALUES ($1, $2)
-      ON CONFLICT (module_id, user_id) DO NOTHING
-    `, [moduleId, ctx.from.id]);
-  } catch (logErr) {
-    console.error("Error logging module download:", logErr);
-  }
+  const res = await pool.query("SELECT title, file_id FROM department_modules WHERE id = $1", [moduleId]);
+  if (res.rows.length === 0) return ctx.reply("⚠️ Module not found or removed.");
 
   try {
-    await ctx.replyWithDocument(mod.file_id, {
-      caption: `📖 **${mod.title}**\n\n_Renaissance Global Official Course Module_`,
-      parse_mode: 'Markdown'
-    });
+    await pool.query("INSERT INTO module_downloads (module_id, user_id) VALUES ($1, $2) ON CONFLICT (module_id, user_id) DO NOTHING", [moduleId, ctx.from.id]);
+  } catch (e) {}
+
+  try {
+    await ctx.replyWithDocument(res.rows[0].file_id, { caption: `📖 **${res.rows[0].title}**\n\n_Renaissance Global Official Course Module_`, parse_mode: 'Markdown' });
   } catch (err) {
-    console.error("Error sending module document:", err);
-    await ctx.reply("❌ Unable to download this module right now. Please notify administration.");
+    ctx.reply("❌ Unable to download module.");
   }
 });
 
 bot.callbackQuery(/^paytype_(reg|full)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const planType = ctx.match[1];
-  const userId = ctx.from.id;
-  const lang = await getUserLang(userId);
-  const t = STRINGS[lang];
-
-  try {
-    await ctx.editMessageText(
-      t.selectDept,
-      { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard(planType) }
-    );
-  } catch (e) {}
+  const lang = await getUserLang(ctx.from.id);
+  await ctx.editMessageText(STRINGS[lang].selectDept, { parse_mode: 'Markdown', reply_markup: getDepartmentKeyboard(ctx.match[1]) });
 });
 
 bot.callbackQuery('cmd_status', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
-
-  const res = await pool.query(
-    'SELECT department, status, rejection_reason, updated_at FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1',
-    [userId]
-  );
-
-  if (res.rows.length === 0) {
-    const noSubMsg = lang === 'am' 
-      ? "ℹ️ እስከ አሁን ምንም ደረሰኝ አላስገቡም። ለማስገባት የታችኛውን ቁልፎች ይጫኑ።"
-      : "ℹ️ You have not submitted any payment receipts yet. Use the action panel below to start.";
-    return ctx.reply(noSubMsg, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
-  }
+  const res = await pool.query('SELECT department, status, rejection_reason FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1', [userId]);
+  if (res.rows.length === 0) return ctx.reply(lang === 'am' ? "ℹ️ ምንም ደረሰኝ አላስገቡም።" : "ℹ️ No payment receipts submitted yet.", { reply_markup: getStudentKeyboard(lang, null) });
 
   const ticket = res.rows[0];
   let timeline = "";
-  let statusText = "";
-
   if (ticket.status === 'PENDING') {
-    timeline = lang === 'am'
-      ? "📌 **የሂደት ሁኔታ ማሳያ (Timeline):**\n\n✅ 1. ደረሰኝ መላክ\n⏳ 2. የሰራተኞች ግምገማ (በሂደት ላይ...)\n❌ 3. ማጽደቅ / ፒዲኤፍ ማግኘት"
-      : "📌 **Live Progress Timeline:**\n\n✅ 1. Receipt Submitted\n⏳ 2. Staff Review (In Progress...)\n❌ 3. Approval & PDF Generation";
-    statusText = lang === 'am' ? "በመጠባበቅ ላይ (Pending Review)" : "Pending Review";
+    timeline = lang === 'am' ? "✅ 1. ደረሰኝ መላክ\n⏳ 2. የሰራተኞች ግምገማ (በሂደት ላይ...)\n❌ 3. ማጽደቅ" : "✅ 1. Receipt Submitted\n⏳ 2. Staff Review (In Progress...)\n❌ 3. Approval";
   } else if (ticket.status === 'APPROVED') {
-    timeline = lang === 'am'
-      ? "📌 **የሂደት ሁኔታ ማሳያ (Timeline):**\n\n✅ 1. ደረሰኝ መላክ\n✅ 2. የሰራተኞች ግምገማ\n✅ 3. ጸድቋል & ፒዲኤፍ ተልኳል"
-      : "📌 **Live Progress Timeline:**\n\n✅ 1. Receipt Submitted\n✅ 2. Staff Review\n✅ 3. Approved & PDF Dispatched";
-    statusText = lang === 'am' ? "ተረጋግጧል (Approved)" : "Approved";
-  } else if (ticket.status === 'REJECTED') {
-    timeline = lang === 'am'
-      ? "📌 **የሂደት ሁኔታ ማሳያ (Timeline):**\n\n✅ 1. ደረሰኝ መላክ\n✅ 2. ግምገማ ተጠናቋል\n❌ 3. ውድቅ ተደርጓል (ማስተካከያ ይፈልጋል)"
-      : "📌 **Live Progress Timeline:**\n\n✅ 1. Receipt Submitted\n✅ 2. Staff Review Completed\n❌ 3. Rejected (Action Required)";
-    statusText = lang === 'am' ? "ውድቅ ተደርጓል (Rejected)" : "Rejected";
+    timeline = lang === 'am' ? "✅ 1. ደረሰኝ መላክ\n✅ 2. የሰራተኞች ግምገማ\n✅ 3. ጸድቋል & ተፈቅዷል" : "✅ 1. Receipt Submitted\n✅ 2. Staff Review\n✅ 3. Approved & Cleared";
+  } else {
+    timeline = lang === 'am' ? "✅ 1. ደረሰኝ መላክ\n❌ 2. ውድቅ ተደርጓል (ማስተካከያ ይፈልጋል)" : "✅ 1. Receipt Submitted\n❌ 2. Rejected (Action Required)";
   }
 
-  let msg = lang === 'am' 
-    ? `📋 **የክፍያዎ ሁኔታ ማጠቃለያ**\n\n• **ትምህርት ክፍል:** ${ticket.department}\n• **ሁኔታ:** **${statusText}**\n\n${timeline}\n`
-    : `📋 **Your Payment Status Tracker**\n\n• **Department:** ${ticket.department}\n• **Status:** **${statusText}**\n\n${timeline}\n`;
-  
-  if (ticket.status === 'REJECTED' && ticket.rejection_reason) {
-    msg += lang === 'am' 
-      ? `\n• **ምክንያት:** ${ticket.rejection_reason}\n\nእባክዎን አዲስ ደረሰኝ ለመላክ 'ደረሰኝ አስገባ' የሚለውን ይጫኑ።`
-      : `\n• **Reason:** ${ticket.rejection_reason}\n\nTap 'Submit Payment' in the panel to re-upload.`;
-  }
-
+  let msg = `📋 **Status:** **${ticket.status}**\n• **Department:** ${ticket.department}\n\n${timeline}\n`;
+  if (ticket.status === 'REJECTED' && ticket.rejection_reason) msg += `\n• **Reason:** ${ticket.rejection_reason}`;
   await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, ticket.status) });
 });
 
@@ -1447,342 +1339,127 @@ bot.callbackQuery('cmd_history', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
+  const res = await pool.query('SELECT department, status, rejection_reason, created_at FROM tickets WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20', [userId]);
+  if (res.rows.length === 0) return ctx.reply("ℹ️ No submission history.", { reply_markup: getStudentKeyboard(lang, null) });
 
-  const res = await pool.query(
-    'SELECT department, status, rejection_reason, created_at FROM tickets WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20',
-    [userId]
-  );
-
-  if (res.rows.length === 0) {
-    const noHistory = lang === 'am'
-      ? "ℹ️ ምንም የተመዘገበ የክፍያ ታሪክ የለም።"
-      : "ℹ️ No payment submission history found.";
-    return ctx.reply(noHistory, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
-  }
-
-  let text = lang === 'am'
-    ? `📜 **የክፍያ ታሪክዎት (የመጨረሻዎቹ ${res.rows.length}):**\n\n`
-    : `📜 **Your Payment History (Latest ${res.rows.length}):**\n\n`;
-
+  let text = "📜 **Payment History:**\n\n";
   for (let idx = 0; idx < res.rows.length; idx++) {
     const r = res.rows[idx];
-    const dateStr = new Date(r.created_at).toLocaleDateString();
-    let statusIcon = "⏳";
-    if (r.status === 'APPROVED') statusIcon = "✅";
-    if (r.status === 'REJECTED') statusIcon = "❌";
-
-    let itemText = `${idx + 1}. ${statusIcon} **${r.department}**\n`;
-    itemText += `   • Status: ${r.status}\n`;
-    itemText += `   • Date: ${dateStr}\n`;
-    if (r.status === 'REJECTED' && r.rejection_reason) {
-      itemText += `   • Reason: ${r.rejection_reason}\n`;
-    }
+    const icon = r.status === 'APPROVED' ? "✅" : (r.status === 'REJECTED' ? "❌" : "⏳");
+    let itemText = `${idx + 1}. ${icon} **${r.department}**\n   • Status: ${r.status}\n   • Date: ${new Date(r.created_at).toLocaleDateString()}\n`;
+    if (r.status === 'REJECTED' && r.rejection_reason) itemText += `   • Reason: ${r.rejection_reason}\n`;
     itemText += `\n`;
-
     if ((text + itemText).length > 3800) {
       await ctx.reply(text, { parse_mode: 'Markdown' });
       text = "";
     }
     text += itemText;
   }
-
-  if (text.trim().length > 0) {
-    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
-  }
+  if (text.trim().length > 0) await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
 });
 
 bot.callbackQuery('cmd_help', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const userId = ctx.from.id;
-  const lang = await getUserLang(userId);
-  const t = STRINGS[lang];
-  await ctx.reply(t.helpText, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
+  const lang = await getUserLang(ctx.from.id);
+  await ctx.reply(STRINGS[lang].helpText, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) });
 });
 
 bot.callbackQuery('start_resubmit', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const userId = ctx.from.id;
-  const lang = await getUserLang(userId);
-  const t = STRINGS[lang];
-
-  await clearPendingDepartment(userId);
-
-  await ctx.reply(
-    t.selectPlan,
-    { parse_mode: 'Markdown', reply_markup: getPaymentTypeKeyboard(lang) }
-  );
+  const lang = await getUserLang(ctx.from.id);
+  await clearPendingDepartment(ctx.from.id);
+  await ctx.reply(STRINGS[lang].selectPlan, { parse_mode: 'Markdown', reply_markup: getPaymentTypeKeyboard(lang) });
 });
 
 bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const isFull = ctx.match[1] === 'full';
-  const baseDept = ctx.match[2];
-  const userId = ctx.from.id;
-  const lang = await getUserLang(userId);
-  const t = STRINGS[lang];
-
-  const fullTaggedDept = isFull 
-    ? `${baseDept} (4-Year Complete)`
-    : `${baseDept} (Regular / Term)`;
-
-  await setPendingDepartment(userId, fullTaggedDept);
-
-  try {
-    await ctx.editMessageText(
-      t.sendReceiptPrompt.replace('{dept}', fullTaggedDept),
-      { parse_mode: 'Markdown' }
-    );
-  } catch (e) {}
+  const fullTaggedDept = `${ctx.match[2]} ${ctx.match[1] === 'full' ? '(4-Year Complete)' : '(Regular / Term)'}`;
+  await setPendingDepartment(ctx.from.id, fullTaggedDept);
+  const lang = await getUserLang(ctx.from.id);
+  await ctx.editMessageText(STRINGS[lang].sendReceiptPrompt.replace('{dept}', fullTaggedDept), { parse_mode: 'Markdown' });
 });
 
 // COMMAND-BASED UPLOAD (/module Marketing Management | Title)
 bot.command(['module', 'uploadmodule'], async (ctx) => {
-  const authorized = await isStaff(ctx);
-  if (!authorized) return;
-
+  if (!(await isStaff(ctx))) return;
   const staffGroupId = await getActiveStaffGroupId();
-  if (!staffGroupId) {
-    return ctx.reply("⚠️ Staff group configuration missing. Run /bind inside your staff group first.");
-  }
+  if (!staffGroupId) return ctx.reply("⚠️ Run /bind in staff group first.");
 
-  const doc = ctx.message.document || (ctx.message.reply_to_message && ctx.message.reply_to_message.document);
-  if (!doc) {
-    return ctx.reply(
-      "⚠️ **Please attach or reply to a PDF document.**\n\n*Format:*\n`/module <Department> | <Module Title>`\n\n*Example:*\n`/module Marketing Management | Consumer Behavior 101`",
-      { parse_mode: 'Markdown' }
-    );
-  }
+  const doc = ctx.message.document || ctx.message.reply_to_message?.document;
+  if (!doc) return ctx.reply("⚠️ Format: Attach or reply to PDF with `/module Department | Title`");
 
-  const rawText = ctx.message.caption || ctx.message.text || '';
-  const textArgs = rawText.replace(/^\/(module|uploadmodule)/, '').trim();
-  const parts = textArgs.split('|').map(s => s.trim());
-
-  if (parts.length < 2 || !parts[0] || !parts[1]) {
-    return ctx.reply(
-      "⚠️ **Invalid Format!**\nPlease separate the department and title with a pipe (`|`).\n\n*Example:* `/module Accounting and finance | Financial Accounting I`",
-      { parse_mode: 'Markdown' }
-    );
-  }
+  const parts = (ctx.message.caption || ctx.message.text || '').replace(/^\/(module|uploadmodule)/, '').trim().split('|').map(s => s.trim());
+  if (parts.length < 2 || !parts[0] || !parts[1]) return ctx.reply("⚠️ Provide both `<Dept> | <Title>`");
 
   const [dept, title] = parts;
-  const staffUploader = ctx.from.username ? `@${ctx.from.username}` : `${ctx.from.first_name || 'Staff'}`;
-
   try {
-    let vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
+    const vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
+    const vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, {
+      message_thread_id: vaultTopicId,
+      caption: `📚 **COURSE MODULE ARCHIVE**\n• Department: ${dept}\n• Title: ${title}`,
+      parse_mode: 'Markdown'
+    });
 
-    const vaultCaption = `📚 **COURSE MODULE ARCHIVE**\n\n• **Department:** ${dept}\n• **Title:** ${title}\n• **Uploaded by:** ${staffUploader}\n• **File:** \`${doc.file_name || 'document.pdf'}\``;
-
-    let vaultMsg;
-    try {
-      vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, {
-        message_thread_id: vaultTopicId,
-        caption: vaultCaption,
-        parse_mode: 'Markdown'
-      });
-    } catch (sendErr) {
-      if (sendErr.description && sendErr.description.includes('thread not found')) {
-        await pool.query('UPDATE group_settings SET modules_topic_id = NULL WHERE group_id = $1', [staffGroupId]);
-        vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
-        vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, {
-          message_thread_id: vaultTopicId,
-          caption: vaultCaption,
-          parse_mode: 'Markdown'
-        });
-      } else {
-        throw sendErr;
-      }
-    }
-
-    const savedFileId = vaultMsg.document.file_id;
-    const insRes = await pool.query(
-      "INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4) RETURNING id",
-      [dept, title, savedFileId, doc.file_name || `${title}.pdf`]
-    );
+    const insRes = await pool.query("INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4) RETURNING id", [dept, title, vaultMsg.document.file_id, doc.file_name || `${title}.pdf`]);
     const newModId = insRes.rows[0].id;
 
-    const isInsideVault = String(ctx.chat.id) === staffGroupId && ctx.message.message_thread_id === vaultTopicId;
-    if (ctx.chat.type !== 'private' && !isInsideVault) {
+    if (ctx.chat.type !== 'private' && ctx.message.message_thread_id !== vaultTopicId) {
       try {
         await ctx.deleteMessage();
-        if (ctx.message.reply_to_message) {
-          await ctx.api.deleteMessage(ctx.chat.id, ctx.message.reply_to_message.message_id);
-        }
-      } catch (delErr) {
-        console.error("Auto-cleanup delete error:", delErr);
-      }
+        if (ctx.message.reply_to_message) await ctx.api.deleteMessage(ctx.chat.id, ctx.message.reply_to_message.message_id);
+      } catch (e) {}
     }
 
-    const notifyKb = new InlineKeyboard()
-      .text("📢 Notify Enrolled Students", `notify_mod_${newModId}`).row()
-      .text("🔕 Silent Upload", "dismiss_mod_notify");
-
-    if (ctx.chat.type === 'private') {
-      await ctx.reply(
-        `✅ **Successfully Stashed in Vault!**\n\n• **Department:** ${dept}\n• **Title:** ${title}\n\nWould you like to broadcast this release to enrolled students?`,
-        { parse_mode: 'Markdown', reply_markup: notifyKb }
-      );
-    } else {
-      await ctx.api.sendMessage(
-        staffGroupId,
-        `✅ Stashed new module for **${dept}** into Vault.\n\nNotify enrolled students now?`,
-        { message_thread_id: vaultTopicId, parse_mode: 'Markdown', reply_markup: notifyKb }
-      );
-    }
-
+    const notifyKb = new InlineKeyboard().text("📢 Notify Enrolled Students", `notify_mod_${newModId}`).row().text("🔕 Silent Upload", "dismiss_mod_notify");
+    await ctx.reply(`✅ **Module Stashed in Vault!**\n• Department: ${dept}\n• Title: ${title}\n\nBroadcast to enrolled students?`, { reply_markup: notifyKb });
   } catch (err) {
-    console.error("Failed to stash module:", err);
-    await ctx.reply(`❌ Failed to stash module: ${err.message}`);
+    ctx.reply(`❌ Failed: ${err.message}`);
   }
 });
 
 bot.callbackQuery(/^trans_(\d+)_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const userId = Number(ctx.match[1]);
-  const topicId = Number(ctx.match[2]);
-
-  try {
-    await ctx.editMessageText("📂 **Select new department for transfer:**", {
-      parse_mode: 'Markdown',
-      reply_markup: getTransferKeyboard(userId, topicId)
-    });
-  } catch (e) {}
+  await ctx.editMessageText("📂 **Select new department:**", { reply_markup: getTransferKeyboard(Number(ctx.match[1]), Number(ctx.match[2])) });
 });
 
 bot.callbackQuery(/^canceltrans_(\d+)_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const userId = Number(ctx.match[1]);
-  const topicId = Number(ctx.match[2]);
-
-  const ticketRes = await pool.query(
-    'SELECT username, department FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' LIMIT 1',
-    [userId, topicId]
-  );
-
-  if (ticketRes.rows.length === 0) {
-    try {
-      return ctx.editMessageText("⚠️ Ticket status changed or non-existent.");
-    } catch (e) {
-      return;
-    }
-  }
-
-  const { username, department } = ticketRes.rows[0];
-
-  const actionKeyboard = new InlineKeyboard()
-    .text("✅ Approve", `app_${userId}_${topicId}`).row()
-    .text("❌ Reject", `rej_${userId}_${topicId}`).row()
-    .text("🔄 Transfer Dept", `trans_${userId}_${topicId}`);
-
-  try {
-    await ctx.editMessageText(
-      `📥 New Submission\n• Student ID: ${userId}\n• Username: @${username || 'Unknown'}\n• Department: ${department}`,
-      { reply_markup: actionKeyboard }
-    );
-  } catch (e) {}
+  const res = await pool.query('SELECT username, department FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' LIMIT 1', [Number(ctx.match[1]), Number(ctx.match[2])]);
+  if (res.rows.length === 0) return ctx.editMessageText("⚠️ Ticket status changed.");
+  const kb = new InlineKeyboard().text("✅ Approve", `app_${ctx.match[1]}_${ctx.match[2]}`).row().text("❌ Reject", `rej_${ctx.match[1]}_${ctx.match[2]}`).row().text("🔄 Transfer Dept", `trans_${ctx.match[1]}_${ctx.match[2]}`);
+  await ctx.editMessageText(`📥 New Submission\n• Student ID: ${ctx.match[1]}\n• Username: @${res.rows[0].username || 'Unknown'}\n• Department: ${res.rows[0].department}`, { reply_markup: kb });
 });
 
 bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-
   const targetUserId = Number(ctx.match[1]);
   const originTopicId = Number(ctx.match[2]);
-  const deptCode = ctx.match[3];
   const staffGroupId = await getActiveStaffGroupId();
+  if (!staffGroupId) return;
 
-  if (!staffGroupId) {
-    return ctx.reply("⚠️ Staff group configuration missing. Run /bind in your staff group.");
-  }
+  const ticketRes = await pool.query('SELECT topic_id, message_id, ticket_msg_id, username, department FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' ORDER BY updated_at DESC LIMIT 1', [targetUserId, originTopicId]);
+  if (ticketRes.rows.length === 0) return ctx.editMessageText("⚠️ Already transferred or processed.");
 
-  const ticketRes = await pool.query(
-    'SELECT topic_id, message_id, ticket_msg_id, username, department FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' ORDER BY updated_at DESC LIMIT 1',
-    [targetUserId, originTopicId]
-  );
-
-  if (ticketRes.rows.length === 0) {
-    try {
-      return ctx.editMessageText("⚠️ This submission is no longer pending or has already been transferred.", { parse_mode: 'Markdown' });
-    } catch (e) {
-      return;
-    }
-  }
-
-  const ticket = ticketRes.rows[0];
-  const username = ticket.username || 'Unknown';
-  const currentDept = ticket.department || '';
-
-  let planSuffix = "(Regular / Term)";
-  if (currentDept.includes("(4-Year Complete)")) {
-    planSuffix = "(4-Year Complete)";
-  }
-
-  const baseDeptMap = {
-    mkt: "Marketing Management",
-    biz: "Business Management",
-    agri: "Agribusiness and Value chain management",
-    ed: "Educational planning and management",
-    acc: "Accounting and finance",
-    log: "Logistics and Supply chain management"
-  };
-
-  const newDeptTagged = `${baseDeptMap[deptCode]} ${planSuffix}`;
+  const deptMap = { mkt: "Marketing Management", biz: "Business Management", agri: "Agribusiness and Value chain management", ed: "Educational planning and management", acc: "Accounting and finance", log: "Logistics and Supply chain management" };
+  const planSuffix = ticketRes.rows[0].department.includes("(4-Year Complete)") ? "(4-Year Complete)" : "(Regular / Term)";
+  const newDeptTagged = `${deptMap[ctx.match[3]]} ${planSuffix}`;
   const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged, staffGroupId);
 
+  const newForwardRes = await ctx.api.copyMessage(staffGroupId, staffGroupId, Number(ticketRes.rows[0].message_id), { message_thread_id: newTopicId });
+  const kb = new InlineKeyboard().text("✅ Approve", `app_${targetUserId}_${newTopicId}`).row().text("❌ Reject", `rej_${targetUserId}_${newTopicId}`).row().text("🔄 Transfer Dept", `trans_${targetUserId}_${newTopicId}`);
+  const newTicketMsg = await ctx.api.sendMessage(staffGroupId, `📥 New Submission\n• Student ID: ${targetUserId}\n• Username: @${ticketRes.rows[0].username}\n• Department: ${newDeptTagged}`, { message_thread_id: newTopicId, reply_markup: kb });
+
+  await pool.query(`UPDATE tickets SET department = $1, topic_id = $2, message_id = $3, ticket_msg_id = $4, updated_at = CURRENT_TIMESTAMP WHERE user_id = $5 AND status = 'PENDING'`, [newDeptTagged, newTopicId, newForwardRes.message_id, newTicketMsg.message_id, targetUserId]);
+  try { await ctx.api.deleteMessage(staffGroupId, Number(ticketRes.rows[0].message_id)); } catch (e) {}
+  try { await ctx.api.deleteMessage(staffGroupId, Number(ticketRes.rows[0].ticket_msg_id)); } catch (e) {}
+
   try {
-    const newForwardRes = await ctx.api.copyMessage(staffGroupId, staffGroupId, Number(ticket.message_id), {
-      message_thread_id: newTopicId
-    });
-
-    const actionKeyboard = new InlineKeyboard()
-      .text("✅ Approve", `app_${targetUserId}_${newTopicId}`).row()
-      .text("❌ Reject", `rej_${targetUserId}_${newTopicId}`).row()
-      .text("🔄 Transfer Dept", `trans_${targetUserId}_${newTopicId}`);
-
-    const newTicketMsg = await ctx.api.sendMessage(
-      staffGroupId,
-      `📥 New Submission\n• Student ID: ${targetUserId}\n• Username: @${username}\n• Department: ${newDeptTagged}`,
-      { message_thread_id: newTopicId, reply_markup: actionKeyboard }
-    );
-
-    await pool.query(`
-      UPDATE tickets 
-      SET department = $1, topic_id = $2, message_id = $3, ticket_msg_id = $4, updated_at = CURRENT_TIMESTAMP 
-      WHERE user_id = $5 AND status = 'PENDING'
-    `, [newDeptTagged, newTopicId, newForwardRes.message_id, newTicketMsg.message_id, targetUserId]);
-
-    if (ticket.message_id) {
-      try {
-        await ctx.api.deleteMessage(staffGroupId, Number(ticket.message_id));
-      } catch (e) {
-        console.error("Could not delete old receipt media message:", e);
-      }
-    }
-
-    if (ticket.ticket_msg_id) {
-      try {
-        await ctx.api.deleteMessage(staffGroupId, Number(ticket.ticket_msg_id));
-      } catch (e) {
-        console.error("Could not delete old action panel message:", e);
-      }
-    }
-
-    try {
-      const studentLang = await getUserLang(targetUserId);
-      const t = STRINGS[studentLang];
-      await ctx.api.sendMessage(
-        targetUserId,
-        t.deptUpdated.replace('{dept}', newDeptTagged),
-        { parse_mode: 'Markdown' }
-      );
-    } catch (studentErr) {
-      console.error("Could not send transfer notification to student:", studentErr);
-    }
-
-  } catch (e) {
-    console.error("Error transferring message:", e);
-  }
+    const sLang = await getUserLang(targetUserId);
+    await ctx.api.sendMessage(targetUserId, STRINGS[sLang].deptUpdated.replace('{dept}', newDeptTagged), { parse_mode: 'Markdown' });
+  } catch (e) {}
 });
 
-// MAIN MESSAGE HANDLER (CATCHES RECEIPTS AND INTERACTIVE MODULE UPLOADS)
+// MAIN MESSAGE HANDLER
 bot.on('message', async (ctx) => {
   if (ctx.from && ctx.from.is_bot) return;
   if (ctx.message.text && ctx.message.text.startsWith('/')) return;
@@ -1792,10 +1469,9 @@ bot.on('message', async (ctx) => {
   const isPrivate = ctx.chat.type === 'private';
   const topicId = ctx.message.message_thread_id;
 
-  // 1. CATCH INTERACTIVE STAFF MODULE UPLOAD (FROM PROMPT SCREENSHOT)
+  // 1. CATCH INTERACTIVE MODULE UPLOAD
   let staffDept = await getStaffPendingModuleDept(ctx.from.id);
-  
-  if (!staffDept && ctx.message.reply_to_message && ctx.message.reply_to_message.text) {
+  if (!staffDept && ctx.message.reply_to_message?.text) {
     const match = ctx.message.reply_to_message.text.match(/Selected Department:\s*([^\n]+)/);
     if (match) staffDept = match[1].trim();
   }
@@ -1803,139 +1479,59 @@ bot.on('message', async (ctx) => {
   if (isStaffGroup && staffDept && ctx.message.document) {
     const doc = ctx.message.document;
     const moduleTitle = doc.file_name ? doc.file_name.replace(/\.pdf$/i, '') : 'Course Module';
-    const staffUploader = ctx.from.username ? `@${ctx.from.username}` : `${ctx.from.first_name || 'Staff'}`;
-
     try {
       const vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
-
-      const vaultCaption = `📚 **COURSE MODULE ARCHIVE**\n\n• **Department:** ${staffDept}\n• **Title:** ${moduleTitle}\n• **Uploaded by:** ${staffUploader}\n• **File:** \`${doc.file_name || 'document.pdf'}\``;
-
       const vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, {
         message_thread_id: vaultTopicId,
-        caption: vaultCaption,
+        caption: `📚 **COURSE MODULE ARCHIVE**\n• Department: ${staffDept}\n• Title: ${moduleTitle}`,
         parse_mode: 'Markdown'
       });
-
-      const insRes = await pool.query(
-        "INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4) RETURNING id",
-        [staffDept, moduleTitle, vaultMsg.document.file_id, doc.file_name || `${moduleTitle}.pdf`]
-      );
-      const newModId = insRes.rows[0].id;
-
+      const insRes = await pool.query("INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4) RETURNING id", [staffDept, moduleTitle, vaultMsg.document.file_id, doc.file_name || `${moduleTitle}.pdf`]);
       await clearStaffPendingModuleDept(ctx.from.id);
+      try { await ctx.deleteMessage(); } catch (e) {}
 
-      // Auto-delete loose PDF from this topic so the group stays clean
-      try {
-        await ctx.deleteMessage();
-      } catch (delErr) {}
-
-      const notifyKb = new InlineKeyboard()
-        .text("📢 Notify Enrolled Students", `notify_mod_${newModId}`).row()
-        .text("🔕 Silent Upload", "dismiss_mod_notify");
-
-      return ctx.reply(
-        `✅ **Module Stashed Successfully!**\n\n• **Department:** ${staffDept}\n• **Title:** ${moduleTitle}\n• Saved in **📚 [Course Modules Vault]**!\n\nNotify enrolled students now?`,
-        { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: notifyKb }
-      );
+      const notifyKb = new InlineKeyboard().text("📢 Notify Enrolled Students", `notify_mod_${insRes.rows[0].id}`).row().text("🔕 Silent Upload", "dismiss_mod_notify");
+      return ctx.reply(`✅ **Module Stashed in Vault!**\n• Department: ${staffDept}\n• Title: ${moduleTitle}\n\nNotify enrolled students now?`, { message_thread_id: topicId, reply_markup: notifyKb });
     } catch (err) {
-      console.error("Error processing staff module upload:", err);
-      return ctx.reply(`❌ Failed to upload module: ${err.message}`, { message_thread_id: topicId });
+      return ctx.reply(`❌ Upload error: ${err.message}`, { message_thread_id: topicId });
     }
   }
 
-  // 2. REPLIES INSIDE STAFF GROUP (SEARCH OR BROADCAST)
+  // 2. REPLIES INSIDE STAFF GROUP (SEARCH, BROADCAST, CHANGE DEPT, REVOKE)
   if (isStaffGroup && ctx.message.reply_to_message) {
-    const originalMsg = ctx.message.reply_to_message;
-
-    if (originalMsg.text && originalMsg.text.includes("Search Student Record")) {
-      const query = ctx.message.text ? ctx.message.text.trim() : '';
-      if (query) await performSearch(ctx, query, topicId);
-      return;
-    }
-
-    if (originalMsg.text && originalMsg.text.includes("Send Student Announcement")) {
-      const broadcastMsg = ctx.message.text ? ctx.message.text.trim() : '';
-      if (broadcastMsg) await performBroadcast(ctx, topicId, broadcastMsg);
-      return;
-    }
+    const orig = ctx.message.reply_to_message.text || '';
+    if (orig.includes("Search Student Record")) return performSearch(ctx, ctx.message.text.trim(), topicId);
+    if (orig.includes("Send Announcement")) return performBroadcast(ctx, topicId, ctx.message.text.trim());
+    if (orig.includes("Change Student Placement")) return executeChangeDeptPrompt(ctx, Number(ctx.message.text.trim()), topicId);
+    if (orig.includes("Revoke Student Approval")) return executeRevoke(ctx, Number(ctx.message.text.trim()), topicId);
   }
 
-  // 3. STUDENT RECEIPT SUBMISSION
+  // 3. STUDENT RECEIPT SUBMISSIONS
   if (isPrivate) {
     const userId = ctx.from.id;
     const lang = await getUserLang(userId);
-    const t = STRINGS[lang];
-
-    const activeCheck = await pool.query(
-      "SELECT 1 FROM tickets WHERE user_id = $1 AND status = 'PENDING' LIMIT 1",
-      [userId]
-    );
-
-    if (activeCheck.rows.length > 0) {
-      return ctx.reply(t.pendingExists, { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, 'PENDING') });
-    }
+    const activeCheck = await pool.query("SELECT 1 FROM tickets WHERE user_id = $1 AND status = 'PENDING' LIMIT 1", [userId]);
+    if (activeCheck.rows.length > 0) return ctx.reply(STRINGS[lang].pendingExists, { reply_markup: getStudentKeyboard(lang, 'PENDING') });
 
     const chosenDeptTagged = await getPendingDepartment(userId);
-    if (!chosenDeptTagged) {
-      const noDeptMsg = lang === 'am'
-        ? "⚠️ **እባክዎን መጀመሪያ ትምህርት ክፍል ይምረጡ**\n\nየመክፈያ ዓይነትዎን እና ትምህርት ክፍልዎን ለመምረጥ ከታች ያለውን ቁልፍ ይጫኑ።"
-        : "⚠️ **Please select your department first!**\n\nTap **Submit Payment** below to choose your payment plan and department before sending your receipt photo.";
-      
-      return ctx.reply(noDeptMsg, {
-        parse_mode: 'Markdown',
-        reply_markup: getStudentKeyboard(lang, null)
-      });
-    }
+    if (!chosenDeptTagged) return ctx.reply(lang === 'am' ? "⚠️ እባክዎን መጀመሪያ ክፍል ይምረጡ።" : "⚠️ Please select your department first!", { reply_markup: getStudentKeyboard(lang, null) });
 
-    const fileId = ctx.message.photo 
-      ? ctx.message.photo[ctx.message.photo.length - 1].file_id 
-      : (ctx.message.document ? ctx.message.document.file_id : null);
-
-    if (!fileId) {
-      await ctx.reply(t.noFileErr, { parse_mode: 'Markdown' });
-      return;
-    }
-
-    if (!staffGroupId) {
-      return ctx.reply("⚠️ System configuration incomplete: Staff group not registered. Please contact administration.");
-    }
+    const fileId = ctx.message.photo ? ctx.message.photo[ctx.message.photo.length - 1].file_id : (ctx.message.document ? ctx.message.document.file_id : null);
+    if (!fileId) return ctx.reply(STRINGS[lang].noFileErr);
+    if (!staffGroupId) return ctx.reply("⚠️ Staff group not registered.");
 
     const username = ctx.from.username || ctx.from.first_name || 'Unknown';
-
     try {
       const topicId = await getOrCreateDepartmentTopic(ctx, chosenDeptTagged, staffGroupId);
-
-      const forwardRes = await ctx.api.copyMessage(staffGroupId, ctx.chat.id, ctx.message.message_id, {
-        message_thread_id: topicId
-      });
-      const forwardedMsgId = forwardRes.message_id;
-
-      const actionKeyboard = new InlineKeyboard()
-        .text("✅ Approve", `app_${userId}_${topicId}`).row()
-        .text("❌ Reject", `rej_${userId}_${topicId}`).row()
-        .text("🔄 Transfer Dept", `trans_${userId}_${topicId}`);
-
-      const sentTicketMsg = await ctx.api.sendMessage(
-        staffGroupId,
-        `📥 New Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${chosenDeptTagged}`,
-        { message_thread_id: topicId, reply_markup: actionKeyboard }
-      );
+      const forwardRes = await ctx.api.copyMessage(staffGroupId, ctx.chat.id, ctx.message.message_id, { message_thread_id: topicId });
+      const kb = new InlineKeyboard().text("✅ Approve", `app_${userId}_${topicId}`).row().text("❌ Reject", `rej_${userId}_${topicId}`).row().text("🔄 Transfer Dept", `trans_${userId}_${topicId}`);
+      const sentTicketMsg = await ctx.api.sendMessage(staffGroupId, `📥 New Submission\n• Student ID: ${userId}\n• Username: @${username}\n• Department: ${chosenDeptTagged}`, { message_thread_id: topicId, reply_markup: kb });
 
       await clearPendingDepartment(userId);
-
-      const studentPanelMsg = await ctx.reply(t.receiptReceived, { 
-        parse_mode: 'Markdown',
-        reply_markup: getStudentKeyboard(lang, 'PENDING')
-      });
-
-      await pool.query(`
-        INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, panel_msg_id, department, status) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PENDING')
-      `, [userId, username, fileId, topicId, forwardedMsgId, sentTicketMsg.message_id, studentPanelMsg.message_id, chosenDeptTagged]);
-
+      const studentPanelMsg = await ctx.reply(STRINGS[lang].receiptReceived, { reply_markup: getStudentKeyboard(lang, 'PENDING') });
+      await pool.query(`INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, panel_msg_id, department, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PENDING')`, [userId, username, fileId, topicId, forwardRes.message_id, sentTicketMsg.message_id, studentPanelMsg.message_id, chosenDeptTagged]);
     } catch (err) {
-      console.error("Failed to forward receipt:", err);
-      return ctx.reply(`❌ Error submitting receipt: ${err.message}`);
+      return ctx.reply(`❌ Submission error: ${err.message}`);
     }
   }
 });
@@ -1944,150 +1540,66 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = Number(ctx.match[1]);
   const topicId = Number(ctx.match[2]);
-  const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
+  const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `Staff`;
   const staffGroupId = await getActiveStaffGroupId();
 
-  const updateRes = await pool.query(
-    "UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING department, username, panel_msg_id",
-    [staffName, userId]
-  );
-  
-  if (updateRes.rowCount === 0) {
-    return ctx.reply("⚠️ Error: Could not find an active pending ticket record in the database for this user.", { message_thread_id: topicId });
-  }
+  const updateRes = await pool.query("UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING department, username, panel_msg_id", [staffName, userId]);
+  if (updateRes.rowCount === 0) return ctx.reply("⚠️ Ticket not found or not pending.", { message_thread_id: topicId });
 
-  const { department: deptTag, username, panel_msg_id } = updateRes.rows[0];
+  const { department, username, panel_msg_id } = updateRes.rows[0];
   const lang = await getUserLang(userId);
-  const t = STRINGS[lang];
 
   if (panel_msg_id) {
-    try {
-      await ctx.api.editMessageReplyMarkup(userId, Number(panel_msg_id), {
-        reply_markup: getStudentKeyboard(lang, 'APPROVED')
-      });
-    } catch (err) {
-      console.error("Could not edit existing panel markup:", err);
-    }
+    try { await ctx.api.editMessageReplyMarkup(userId, Number(panel_msg_id), { reply_markup: getStudentKeyboard(lang, 'APPROVED') }); } catch (e) {}
   }
-
-  try {
-    await ctx.api.sendMessage(userId, t.approvedMsg, {
-      parse_mode: 'Markdown',
-      reply_markup: getStudentKeyboard(lang, 'APPROVED')
-    });
-  } catch (err) {
-    console.error("Could not send approval update to student:", err);
-  }
-
-  try {
-    await ctx.editMessageText(
-      `✅ Approved Submission\n• Student ID: ${userId}\n• Username: @${username || 'N/A'}\n• Department: ${deptTag}\n• Approved by: ${staffName}`,
-      { parse_mode: 'Markdown' }
-    );
-  } catch (e) {}
+  try { await ctx.api.sendMessage(userId, STRINGS[lang].approvedMsg, { reply_markup: getStudentKeyboard(lang, 'APPROVED') }); } catch (e) {}
+  await ctx.editMessageText(`✅ Approved Submission\n• Student ID: ${userId}\n• Username: @${username || 'N/A'}\n• Department: ${department}\n• Approved by: ${staffName}`);
 
   if (APPROVED_THREAD_ID && staffGroupId) {
-    const sortedReport = await generateSummaryText('APPROVED');
-    await ctx.api.sendMessage(staffGroupId, sortedReport, { message_thread_id: APPROVED_THREAD_ID, parse_mode: 'Markdown' });
+    await ctx.api.sendMessage(staffGroupId, await generateSummaryText('APPROVED'), { message_thread_id: APPROVED_THREAD_ID, parse_mode: 'Markdown' });
   }
 });
 
 bot.callbackQuery(/^rej_(\d+)_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const userId = Number(ctx.match[1]);
-  const topicId = Number(ctx.match[2]);
-
-  try {
-    await ctx.editMessageText("❌ **Select rejection reason:**", {
-      parse_mode: 'Markdown',
-      reply_markup: getRejectionReasonKeyboard(userId, topicId)
-    });
-  } catch (e) {}
+  await ctx.editMessageText("❌ **Select rejection reason:**", { reply_markup: getRejectionReasonKeyboard(Number(ctx.match[1]), Number(ctx.match[2])) });
 });
 
 bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = Number(ctx.match[1]);
   const topicId = Number(ctx.match[2]);
-  const reasonCode = ctx.match[3];
-  const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `ID: ${ctx.from.id}`;
-  const staffGroupId = await getActiveStaffGroupId();
+  const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `Staff`;
+  const reasonObj = REJECTION_REASONS.find(r => r.code === ctx.match[3]);
+  const reasonText = reasonObj ? reasonObj.label : "Receipt details unverified";
+
+  const updateRes = await pool.query(`UPDATE tickets SET status = 'REJECTED', rejection_reason = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP WHERE user_id = $3 AND status = 'PENDING' RETURNING panel_msg_id`, [reasonText, staffName, userId]);
+  if (updateRes.rowCount === 0) return ctx.reply("⚠️ Ticket not pending.", { message_thread_id: topicId });
 
   const lang = await getUserLang(userId);
-  const t = STRINGS[lang];
+  const customMessage = reasonObj ? (lang === 'am' ? reasonObj.message_am : reasonObj.message_en) : "Please re-upload.";
 
-  const reasonObj = REJECTION_REASONS.find(r => r.code === reasonCode);
-  const reasonText = reasonObj ? reasonObj.label : "Receipt details unverified";
-  const customMessage = reasonObj ? (lang === 'am' ? reasonObj.message_am : reasonObj.message_en) : "Please re-upload a valid payment receipt.";
-
-  const updateRes = await pool.query(
-    `UPDATE tickets 
-     SET status = 'REJECTED', rejection_reason = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP 
-     WHERE user_id = $3 AND status = 'PENDING' RETURNING panel_msg_id`,
-    [reasonText, staffName, userId]
-  );
-
-  if (updateRes.rowCount === 0) {
-    return ctx.reply("⚠️ Error: Could not find an active pending ticket record for this user.", { message_thread_id: topicId });
+  if (updateRes.rows[0].panel_msg_id) {
+    try { await ctx.api.editMessageReplyMarkup(userId, Number(updateRes.rows[0].panel_msg_id), { reply_markup: getStudentKeyboard(lang, 'REJECTED') }); } catch (e) {}
   }
 
-  const { panel_msg_id } = updateRes.rows[0];
-
-  if (panel_msg_id) {
-    try {
-      await ctx.api.editMessageReplyMarkup(userId, Number(panel_msg_id), {
-        reply_markup: getStudentKeyboard(lang, 'REJECTED')
-      });
-    } catch (err) {
-      console.error("Could not edit panel markup on rejection:", err);
-    }
-  }
-
-  const resubmitKeyboard = new InlineKeyboard().text(t.reuploadBtn, "start_resubmit");
-
-  await ctx.api.sendMessage(
-    userId,
-    t.rejectedMsg.replace('{reason}', reasonText).replace('{message}', customMessage),
-    { parse_mode: 'Markdown', reply_markup: resubmitKeyboard }
-  );
-
-  try {
-    await ctx.editMessageText(`❌ Receipt rejected by **${staffName}**.\n**Reason:** ${reasonText}`, { parse_mode: 'Markdown' });
-  } catch (e) {}
-
-  if (REJECTED_THREAD_ID && staffGroupId) {
-    await ctx.api.sendMessage(
-      staffGroupId,
-      `❌ **REJECTED RECEIPT**\n• Student ID: \`${userId}\`\n• Staff: **${staffName}**\n• Reason: ${reasonText}`,
-      { message_thread_id: REJECTED_THREAD_ID, parse_mode: 'Markdown' }
-    );
-  }
+  const resubmitKeyboard = new InlineKeyboard().text(STRINGS[lang].reuploadBtn, "start_resubmit");
+  await ctx.api.sendMessage(userId, STRINGS[lang].rejectedMsg.replace('{reason}', reasonText).replace('{message}', customMessage), { parse_mode: 'Markdown', reply_markup: resubmitKeyboard });
+  await ctx.editMessageText(`❌ Receipt rejected by **${staffName}**.\n**Reason:** ${reasonText}`, { parse_mode: 'Markdown' });
 });
 
 cron.schedule('0 8 * * *', async () => {
   try {
     const staffGroupId = await getActiveStaffGroupId();
     if (!staffGroupId) return;
-
-    const appSummary = await generateSummaryText('APPROVED');
-    const rejSummary = await generateSummaryText('REJECTED');
-    
     const pendingRes = await pool.query("SELECT COUNT(*) FROM tickets WHERE status = 'PENDING'");
-    const totalPending = pendingRes.rows[0].count;
-
-    const dailyReport = `🌅 **DAILY TUITION PORTAL SUMMARY**\n\n⏳ **Total Pending:** ${totalPending}\n\n---\n\n${appSummary}\n\n---\n\n${rejSummary}`;
-
+    const dailyReport = `🌅 **DAILY TUITION PORTAL SUMMARY**\n\n⏳ **Total Pending:** ${pendingRes.rows[0].count}\n\n---\n\n${await generateSummaryText('APPROVED')}\n\n---\n\n${await generateSummaryText('REJECTED')}`;
     await bot.api.sendMessage(staffGroupId, dailyReport, { message_thread_id: APPROVED_THREAD_ID || null });
-  } catch (err) {
-    console.error("Error generating daily summary cron report:", err);
-  }
+  } catch (err) {}
 });
 
 app.use('/webhook', webhookCallback(bot, 'express'));
-
-app.get('/', (req, res) => {
-  res.send('Tuition Receipt Bot is active');
-});
+app.get('/', (req, res) => res.send('Tuition Receipt Bot is active'));
 
 async function main() {
   await initDB();
@@ -2106,20 +1618,16 @@ async function main() {
       { command: 'approved', description: 'View approved students directory (Staff only)' },
       { command: 'revoke', description: 'Revoke approved tuition payment (Staff only)' }
     ]);
-  } catch (cmdErr) {
-    console.error("Failed to register bot commands:", cmdErr.message);
-  }
+  } catch (cmdErr) {}
 
   const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL; 
   if (RENDER_EXTERNAL_URL) {
     const webhookUrl = `${RENDER_EXTERNAL_URL}/webhook`;
     await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
-    console.log(`Webhook successfully bound to: ${webhookUrl}`);
+    console.log(`Webhook bound to: ${webhookUrl}`);
   }
 
-  app.listen(PORT, () => {
-    console.log(`Server listening on port ${PORT}`);
-  });
+  app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 }
 
 main();
