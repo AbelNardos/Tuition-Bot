@@ -26,15 +26,10 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception thrown:', err);
 });
 
-// Self keep-alive ping for external web service
 setInterval(() => {
   const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
   if (RENDER_URL) {
-    https.get(`${RENDER_URL}/`, (res) => {
-      console.log(`Keep-alive ping status: ${res.statusCode}`);
-    }).on('error', (err) => {
-      console.error('Keep-alive ping error:', err.message);
-    });
+    https.get(`${RENDER_URL}/`, (res) => {}).on('error', (err) => {});
   }
 }, 8 * 60 * 1000);
 
@@ -53,12 +48,8 @@ function escapeHtml(str) {
 
 async function initDB() {
   try {
-    await pool.query(`
-      ALTER TABLE department_topics DROP CONSTRAINT IF EXISTS department_topics_pkey;
-    `);
-  } catch (err) {
-    console.error("Error dropping old constraint:", err);
-  }
+    await pool.query(`ALTER TABLE department_topics DROP CONSTRAINT IF EXISTS department_topics_pkey;`);
+  } catch (err) {}
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS group_settings (
@@ -119,17 +110,8 @@ async function initDB() {
 
   try {
     await pool.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS panel_msg_id BIGINT;`);
-  } catch (err) {}
-
-  try {
     await pool.query(`ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS pending_department TEXT;`);
-  } catch (err) {}
-
-  try {
     await pool.query(`ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS pending_module_dept TEXT;`);
-  } catch (err) {}
-
-  try {
     await pool.query(`ALTER TABLE group_settings ADD COLUMN IF NOT EXISTS modules_topic_id BIGINT;`);
   } catch (err) {}
 }
@@ -137,96 +119,49 @@ async function initDB() {
 async function getActiveStaffGroupId() {
   try {
     const res = await pool.query('SELECT group_id FROM group_settings WHERE is_active = TRUE ORDER BY updated_at DESC LIMIT 1');
-    if (res.rows.length > 0) {
-      return res.rows[0].group_id;
-    }
-  } catch (err) {
-    console.error("Error fetching active staff group ID:", err);
-  }
+    if (res.rows.length > 0) return res.rows[0].group_id;
+  } catch (err) {}
   return String(process.env.STAFF_GROUP_ID || '').trim();
 }
 
 async function getUserLang(userId) {
   try {
     const res = await pool.query('SELECT language FROM user_settings WHERE user_id = $1', [userId]);
-    if (res.rows.length > 0 && res.rows[0].language) {
-      return res.rows[0].language;
-    }
-  } catch (err) {
-    console.error("Error fetching user language:", err);
-  }
+    if (res.rows.length > 0 && res.rows[0].language) return res.rows[0].language;
+  } catch (err) {}
   return 'en';
 }
 
 async function setUserLang(userId, lang) {
   try {
-    await pool.query(`
-      INSERT INTO user_settings (user_id, language) VALUES ($1, $2)
-      ON CONFLICT (user_id) DO UPDATE SET language = $2
-    `, [userId, lang]);
-  } catch (err) {
-    console.error("Error setting user language:", err);
-  }
+    await pool.query(`INSERT INTO user_settings (user_id, language) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET language = $2`, [userId, lang]);
+  } catch (err) {}
 }
 
 async function getPendingDepartment(userId) {
-  try {
-    const res = await pool.query('SELECT pending_department FROM user_settings WHERE user_id = $1', [userId]);
-    if (res.rows.length > 0) {
-      return res.rows[0].pending_department;
-    }
-  } catch (err) {
-    console.error("Error fetching pending department:", err);
-  }
-  return null;
+  const res = await pool.query('SELECT pending_department FROM user_settings WHERE user_id = $1', [userId]);
+  return res.rows[0]?.pending_department || null;
 }
 
 async function setPendingDepartment(userId, dept) {
-  try {
-    await pool.query(`
-      INSERT INTO user_settings (user_id, pending_department) 
-      VALUES ($1, $2)
-      ON CONFLICT (user_id) 
-      DO UPDATE SET pending_department = $2
-    `, [userId, dept]);
-  } catch (err) {
-    console.error("Error setting pending department:", err);
-  }
+  await pool.query(`INSERT INTO user_settings (user_id, pending_department) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET pending_department = $2`, [userId, dept]);
 }
 
 async function clearPendingDepartment(userId) {
-  try {
-    await pool.query('UPDATE user_settings SET pending_department = NULL WHERE user_id = $1', [userId]);
-  } catch (err) {
-    console.error("Error clearing pending department:", err);
-  }
+  await pool.query('UPDATE user_settings SET pending_department = NULL WHERE user_id = $1', [userId]);
 }
 
 async function getStaffPendingModuleDept(userId) {
-  try {
-    const res = await pool.query('SELECT pending_module_dept FROM user_settings WHERE user_id = $1', [userId]);
-    if (res.rows.length > 0) {
-      return res.rows[0].pending_module_dept;
-    }
-  } catch (err) {}
-  return null;
+  const res = await pool.query('SELECT pending_module_dept FROM user_settings WHERE user_id = $1', [userId]);
+  return res.rows[0]?.pending_module_dept || null;
 }
 
 async function setStaffPendingModuleDept(userId, dept) {
-  try {
-    await pool.query(`
-      INSERT INTO user_settings (user_id, pending_module_dept) 
-      VALUES ($1, $2)
-      ON CONFLICT (user_id) 
-      DO UPDATE SET pending_module_dept = $2
-    `, [userId, dept]);
-  } catch (err) {}
+  await pool.query(`INSERT INTO user_settings (user_id, pending_module_dept) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET pending_module_dept = $2`, [userId, dept]);
 }
 
 async function clearStaffPendingModuleDept(userId) {
-  try {
-    await pool.query('UPDATE user_settings SET pending_module_dept = NULL WHERE user_id = $1', [userId]);
-  } catch (err) {}
+  await pool.query('UPDATE user_settings SET pending_module_dept = NULL WHERE user_id = $1', [userId]);
 }
 
 async function isStaff(ctx) {
@@ -287,41 +222,17 @@ const STRINGS = {
 };
 
 const REJECTION_REASONS = [
-  { 
-    label: "📷 Blurry/Unreadable Receipt", 
-    code: "blurry",
-    message_en: "Please ensure your receipt image is clear, fully visible, and uncropped, then click below to re-upload.",
-    message_am: "እባክዎን የደረሰኝዎ ፎቶ ግልጽ፣ ሙሉ በሙሉ የሚታይ እና ያልተቆረጠ መሆኑን አረጋግተው እንደገና ይላኩ።"
-  },
-  { 
-    label: "💵 Incorrect Amount Paid", 
-    code: "amount",
-    message_en: "The payment amount does not match your required tuition fees. Please verify your transaction details and re-upload the correct receipt.",
-    message_am: "የተከፈለው የገንዘብ መጠን ከተፈለገው የትምህርት ክፍያ ጋር አይመሳሰልም። እባክዎን የትራንዛክሽን መረጃዎን አረጋግተው ትክክለኛውን ደረሰኝ ይላኩ።"
-  },
-  { 
-    label: "🚫 Invalid/Fake Receipt", 
-    code: "invalid",
-    message_en: "This receipt could not be verified by our finance team. Please submit an official bank transaction receipt.",
-    message_am: "ይህ ደረሰኝ በገንዘብ ያዥ ቡድኑ ሊረጋገጥ አልቻለም። እባክዎን ኦፊሴላዊ የባንክ ደረሰኝ ይላኩ።"
-  },
-  { 
-    label: "👤 Name/ID Mismatch", 
-    code: "mismatch",
-    message_en: "The name or Student ID on the receipt does not match your profile details. Please re-upload a receipt that matches your credentials or contact administration.",
-    message_am: "በደረሰኙ ላይ ያለው ስም ወይም የተማሪ መታወቂያ ከተመዘገበው መረጃ ጋር አይመሳሰልም። እባክዎን ትክክለኛ መረጃ ያለው ደረሰኝ ይላኩ።"
-  }
+  { label: "📷 Blurry/Unreadable Receipt", code: "blurry", message_en: "Please ensure your receipt image is clear, fully visible, and uncropped, then click below to re-upload.", message_am: "እባክዎን የደረሰኝዎ ፎቶ ግልጽ፣ ሙሉ በሙሉ የሚታይ እና ያልተቆረጠ መሆኑን አረጋግተው እንደገና ይላኩ።" },
+  { label: "💵 Incorrect Amount Paid", code: "amount", message_en: "The payment amount does not match your required tuition fees. Please verify your transaction details and re-upload the correct receipt.", message_am: "የተከፈለው የገንዘብ መጠን ከተፈለገው የትምህርት ክፍያ ጋር አይመሳሰልም። እባክዎን የትራንዛክሽን መረጃዎን አረጋግተው ትክክለኛውን ደረሰኝ ይላኩ።" },
+  { label: "🚫 Invalid/Fake Receipt", code: "invalid", message_en: "This receipt could not be verified by our finance team. Please submit an official bank transaction receipt.", message_am: "ይህ ደረሰኝ በገንዘብ ያዥ ቡድኑ ሊረጋገጥ አልቻለም። እባክዎን ኦፊሴላዊ የባንክ ደረሰኝ ይላኩ።" },
+  { label: "👤 Name/ID Mismatch", code: "mismatch", message_en: "The name or Student ID on the receipt does not match your profile details. Please re-upload a receipt that matches your credentials or contact administration.", message_am: "በደረሰኙ ላይ ያለው ስም ወይም የተማሪ መታወቂያ ከተመዘገበው መረጃ ጋር አይመሳሰልም። እባክዎን ትክክለኛ መረጃ ያለው ደረሰኝ ይላኩ።" }
 ];
 
 function getPaymentTypeKeyboard(lang = 'en') {
   if (lang === 'am') {
-    return new InlineKeyboard()
-      .text("💳 መደበኛ የትምህርት ክፍያ (Regular)", "paytype_reg").row()
-      .text("🎓 የ 4 ዓመት ሙሉ ክፍያ (Complete)", "paytype_full");
+    return new InlineKeyboard().text("💳 መደበኛ የትምህርት ክፍያ (Regular)", "paytype_reg").row().text("🎓 የ 4 ዓመት ሙሉ ክፍያ (Complete)", "paytype_full");
   }
-  return new InlineKeyboard()
-    .text("💳 Regular Term Tuition", "paytype_reg").row()
-    .text("🎓 4-Year Complete Tuition", "paytype_full");
+  return new InlineKeyboard().text("💳 Regular Term Tuition", "paytype_reg").row().text("🎓 4-Year Complete Tuition", "paytype_full");
 }
 
 function getDepartmentKeyboard(planType = 'reg') {
@@ -360,7 +271,17 @@ function getModuleDepartmentKeyboard() {
     .text("🔙 Cancel", "moddept_cancel");
 }
 
-function getApprovedRosterKeyboard() {
+// SEPARATE DELETE MODULE DEPARTMENT KEYBOARD (Uses 'delmoddept_')
+function getDeleteModuleDepartmentKeyboard() {
+  return new InlineKeyboard()
+    .text("📈 Marketing", "delmoddept_Marketing Management")
+    .text("💼 Business", "delmoddept_Business Management").row()
+    .text("📊 Accounting & Finance", "delmoddept_Accounting and finance").row()
+    .text("🌾 Agribusiness & VCM", "delmoddept_Agribusiness and Value chain management").row()
+    .text("📚 Ed. Planning & Mgmt", "delmoddept_Educational planning and management").row()
+    .text("🚚 Logistics & SCM", "delmoddept_Logistics and Supply chain management").row()
+    .
+    function getApprovedRosterKeyboard() {
   return new InlineKeyboard()
     .text("🌐 Every Student (All Departments)", "roster_all").row()
     .text("📈 Marketing", "roster_Marketing Management")
@@ -370,6 +291,38 @@ function getApprovedRosterKeyboard() {
     .text("📚 Ed. Planning & Mgmt", "roster_Educational planning and management").row()
     .text("🚚 Logistics & SCM", "roster_Logistics and Supply chain management").row()
     .text("🔙 Cancel", "roster_cancel");
+}
+
+function getStudentKeyboard(lang = 'en', status = null) {
+  const kb = new InlineKeyboard();
+
+  if (lang === 'am') {
+    if (status === 'PENDING') {
+      kb.text('⏳ በግምገማ ላይ ነው', 'cmd_pending_info');
+    } else if (status === 'APPROVED') {
+      kb.text('⬇️ ደረሰኝ አውርድ', 'cmd_download_pdf');
+    } else {
+      kb.text('📤 ደረሰኝ አስገባ', 'cmd_submit');
+    }
+    kb.text('📌 ሁኔታውን ያረጋግጡ', 'cmd_status').row();
+    kb.text('📚 የትምህርት ሞጁሎች', 'cmd_modules').row();
+    kb.text('📜 የክፍያ ታሪክ', 'cmd_history');
+    kb.text('❓ እርዳታ / እገዛ', 'cmd_help');
+  } else {
+    if (status === 'PENDING') {
+      kb.text('⏳ Under Review', 'cmd_pending_info');
+    } else if (status === 'APPROVED') {
+      kb.text('⬇️ Download Slip', 'cmd_download_pdf');
+    } else {
+      kb.text('📤 Submit Payment', 'cmd_submit');
+    }
+    kb.text('📌 Check Status', 'cmd_status').row();
+    kb.text('📚 Course Modules', 'cmd_modules').row();
+    kb.text('📜 My History', 'cmd_history');
+    kb.text('❓ Help / Support', 'cmd_help');
+  }
+
+  return kb;
 }
 
 function getTransferKeyboard(userId, topicId) {
@@ -390,7 +343,7 @@ function getRejectionReasonKeyboard(userId, topicId) {
   });
   return kb;
 }
-// GENERATE APPROVAL PDF WITH EMBEDDED LIVE VERIFICATION QR CODE
+
 async function generateApprovalPDF(userId, username, department, staffName, botUsername) {
   return new Promise(async (resolve, reject) => {
     try {
@@ -400,22 +353,16 @@ async function generateApprovalPDF(userId, username, department, staffName, botU
 
       doc.pipe(stream);
 
-      // Header
       doc.fontSize(20).text('RENAISSANCE GLOBAL', { align: 'center' });
       doc.fontSize(14).text('Official Tuition Payment Approval Slip', { align: 'center' });
       doc.moveDown(2);
 
-      // Verification QR Code
-      const qrData = botUsername 
-        ? `https://t.me/${botUsername}?start=verify_${userId}`
-        : `RENAISSANCE_GLOBAL_VERIFY:${userId}`;
+      const qrData = botUsername ? `https://t.me/${botUsername}?start=verify_${userId}` : `RENAISSANCE_GLOBAL_VERIFY:${userId}`;
       const qrBuffer = await QRCode.toBuffer(qrData, { width: 100, margin: 1 });
 
-      // Embed QR Code
       doc.image(qrBuffer, 440, 110, { width: 95 });
       doc.fontSize(8).text('Scan with camera to verify live clearance', 430, 210, { width: 115, align: 'center' });
 
-      // Student and Receipt Details
       doc.fontSize(12);
       doc.text(`Student ID: ${userId}`);
       doc.text(`Username: @${username}`);
@@ -911,16 +858,26 @@ bot.callbackQuery(/^chgdept_(\d+)_(mkt|biz|acc|agri|ed|log|cancel)$/, async (ctx
   }
 });
 
-// INTERACTIVE /deletemodule MANAGER
+// INTERACTIVE /deletemodule MANAGER (FIXED: Uses 'delmoddept_')
 bot.command(['deletemodule', 'delmod'], async (ctx) => {
   const authorized = await isStaff(ctx);
   if (!authorized) return;
 
   const topicId = ctx.message.message_thread_id;
+  await clearStaffPendingModuleDept(ctx.from.id);
+
+  const kb = new InlineKeyboard()
+    .text("📈 Marketing", "delmoddept_Marketing Management")
+    .text("💼 Business", "delmoddept_Business Management").row()
+    .text("📊 Accounting & Finance", "delmoddept_Accounting and finance").row()
+    .text("🌾 Agribusiness & VCM", "delmoddept_Agribusiness and Value chain management").row()
+    .text("📚 Ed. Planning & Mgmt", "delmoddept_Educational planning and management").row()
+    .text("🚚 Logistics & SCM", "delmoddept_Logistics and Supply chain management").row()
+    .text("🔙 Cancel", "delmoddept_cancel");
 
   await ctx.reply(
     "🗑 **Delete Course Module**\n\nSelect the academic department to view and remove modules:",
-    { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: getModuleDepartmentKeyboard() }
+    { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: kb }
   );
 });
 
@@ -929,9 +886,20 @@ bot.callbackQuery('cmd_delete_module', async (ctx) => {
   const authorized = await isStaff(ctx);
   if (!authorized) return;
 
+  await clearStaffPendingModuleDept(ctx.from.id);
+
+  const kb = new InlineKeyboard()
+    .text("📈 Marketing", "delmoddept_Marketing Management")
+    .text("💼 Business", "delmoddept_Business Management").row()
+    .text("📊 Accounting & Finance", "delmoddept_Accounting and finance").row()
+    .text("🌾 Agribusiness & VCM", "delmoddept_Agribusiness and Value chain management").row()
+    .text("📚 Ed. Planning & Mgmt", "delmoddept_Educational planning and management").row()
+    .text("🚚 Logistics & SCM", "delmoddept_Logistics and Supply chain management").row()
+    .text("🔙 Cancel", "delmoddept_cancel");
+
   await ctx.reply(
     "🗑 **Delete Course Module**\n\nSelect the academic department to view and remove modules:",
-    { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'Markdown', reply_markup: getModuleDepartmentKeyboard() }
+    { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'Markdown', reply_markup: kb }
   );
 });
 
@@ -1104,7 +1072,7 @@ bot.callbackQuery(/^notify_mod_(\d+)$/, async (ctx) => {
       const sLang = await getUserLang(s.user_id);
       const notifText = sLang === 'am'
         ? `📚 **አዲስ የትምህርት ሞጁል ተጭኗል!**\n\n• **ክፍል:** ${cleanDept}\n• **ሞጁል:** ${title}\n\nከታች ያለውን ቁልፍ በመጫን ማውረድ ይችላሉ፡`
-        : `📚 **NEW COURSE MODULE AVAILABLE**\n\n• **Department:** ${cleanDept}\n• **Module:** ${title}\n\nTap below to download directly to your chat:`;
+        : `📚 **NEW COURSE MODULE AVAILABLE**\n\n• **Department:** ${cleanDept}\n• **Module:** ${title}\n\nTap below to download:`;
 
       const dlKb = new InlineKeyboard().text(sLang === 'am' ? "⬇️ አውርድ (Download)" : "⬇️ Download Module", `dlmod_${moduleId}`);
       await bot.api.sendMessage(s.user_id, notifText, { parse_mode: 'Markdown', reply_markup: dlKb });
@@ -1191,13 +1159,8 @@ bot.callbackQuery('cmd_broadcast', async (ctx) => {
 bot.callbackQuery('cmd_upload_module', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   if (!(await isStaff(ctx))) return;
+  await clearStaffPendingModuleDept(ctx.from.id);
   await ctx.reply("📚 **Upload Course Module**\n\nSelect academic department:", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'Markdown', reply_markup: getModuleDepartmentKeyboard() });
-});
-
-bot.callbackQuery('cmd_delete_module', async (ctx) => {
-  try { await ctx.answerCallbackQuery(); } catch (e) {}
-  if (!(await isStaff(ctx))) return;
-  await ctx.reply("🗑 **Delete Course Module**\n\nSelect academic department to remove modules from:", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'Markdown', reply_markup: getModuleDepartmentKeyboard() });
 });
 
 bot.callbackQuery(/^moddept_(.+)$/, async (ctx) => {
@@ -1456,16 +1419,18 @@ bot.on('message', async (ctx) => {
   if (isStaffGroup && staffDept && ctx.message.document) {
     const doc = ctx.message.document;
     const moduleTitle = doc.file_name ? doc.file_name.replace(/\.pdf$/i, '') : 'Course Module';
+    const staffUploader = ctx.from.username ? `@${ctx.from.username}` : `${ctx.from.first_name || 'Staff'}`;
+
     try {
       const vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
       const vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, {
         message_thread_id: vaultTopicId,
-        caption: `📚 **COURSE MODULE ARCHIVE**\n• Department: ${staffDept}\n• Title: ${moduleTitle}`,
+        caption: `📚 **COURSE MODULE ARCHIVE**\n• Department: ${staffDept}\n• Title: ${moduleTitle}\n• Uploaded by: ${staffUploader}`,
         parse_mode: 'Markdown'
       });
       const insRes = await pool.query("INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4) RETURNING id", [staffDept, moduleTitle, vaultMsg.document.file_id, doc.file_name || `${moduleTitle}.pdf`]);
       await clearStaffPendingModuleDept(ctx.from.id);
-      try { await ctx.deleteMessage(); } catch (e) {}
+      try { await ctx.deleteMessage(); } catch (delErr) {}
 
       const notifyKb = new InlineKeyboard().text("📢 Notify Enrolled Students", `notify_mod_${insRes.rows[0].id}`).row().text("🔕 Silent Upload", "dismiss_mod_notify");
       return ctx.reply(`✅ **Module Stashed in Vault!**\n• Department: ${staffDept}\n• Title: ${moduleTitle}\n\nNotify enrolled students now?`, { message_thread_id: topicId, reply_markup: notifyKb });
