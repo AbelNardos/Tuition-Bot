@@ -335,7 +335,6 @@ function getDepartmentKeyboard(planType = 'reg') {
     .text("🚚 Logistics & SCM", `${prefix}Logistics and Supply chain management`);
 }
 
-// 10-BUTTON INTERACTIVE STAFF COMMAND CENTER (5 ROWS OF 2 BUTTONS)
 function getStaffKeyboard() {
   return new InlineKeyboard()
     .text('🔍 Search Record', 'cmd_lookfor')
@@ -674,8 +673,8 @@ bot.command('bind', async (ctx) => {
   );
 });
 
-// STUDENT /start (WITH LIVE QR VERIFICATION SCANNER)
-bot.command('start', async (ctx) => {
+bot.command(['start', 'panel'], async (ctx) => {
+  // LIVE QR CODE VERIFICATION CHECK (Scanned from PDF)
   if (ctx.match && typeof ctx.match === 'string' && ctx.match.startsWith('verify_')) {
     const verifyId = ctx.match.replace('verify_', '').trim();
     const check = await pool.query(
@@ -701,7 +700,23 @@ bot.command('start', async (ctx) => {
     }
   }
 
-  if (ctx.chat.type === 'private') {
+  const staffGroupId = await getActiveStaffGroupId();
+  const isStaffGroup = String(ctx.chat.id) === staffGroupId;
+  const isPrivate = ctx.chat.type === 'private';
+
+  if (isStaffGroup) {
+    const topicId = ctx.message.message_thread_id;
+    return ctx.reply(
+      "⚙️ **RENAISSANCE GLOBAL — STAFF ACTION PANEL**\n\nSelect an action below:",
+      {
+        message_thread_id: topicId,
+        parse_mode: 'Markdown',
+        reply_markup: getStaffKeyboard()
+      }
+    );
+  }
+
+  if (isPrivate) {
     const userId = ctx.from.id;
     await clearPendingDepartment(userId);
 
@@ -714,32 +729,6 @@ bot.command('start', async (ctx) => {
       { parse_mode: 'Markdown', reply_markup: langKeyboard }
     );
   }
-});
-
-// UNIVERSAL STAFF /panel (WORKS IN BOTH SUPERGROUP & PRIVATE DM)
-bot.command('panel', async (ctx) => {
-  const authorized = await isStaff(ctx);
-
-  if (!authorized && ctx.chat.type !== 'private') return;
-
-  if (authorized) {
-    const topicId = ctx.message?.message_thread_id;
-    return ctx.reply(
-      "⚙️ **RENAISSANCE GLOBAL — STAFF ACTION PANEL**\n\nSelect an action below:",
-      {
-        message_thread_id: topicId,
-        parse_mode: 'Markdown',
-        reply_markup: getStaffKeyboard()
-      }
-    );
-  }
-
-  const userId = ctx.from.id;
-  const lang = await getUserLang(userId);
-  await ctx.reply(
-    STRINGS[lang].portalWelcome,
-    { parse_mode: 'Markdown', reply_markup: getStudentKeyboard(lang, null) }
-  );
 });
 // /revoke COMMAND & PANEL HANDLERS (REVERSES ACCIDENTAL APPROVALS)
 async function executeRevoke(ctx, targetUserId, topicId) {
@@ -1137,7 +1126,7 @@ bot.callbackQuery(/^notify_mod_(\d+)$/, async (ctx) => {
       const sLang = await getUserLang(s.user_id);
       const notifText = sLang === 'am'
         ? `📚 **አዲስ የትምህርት ሞጁል ተጭኗል!**\n\n• **ክፍል:** ${cleanDept}\n• **ሞጁል:** ${title}\n\nከታች ያለውን ቁልፍ በመጫን ማውረድ ይችላሉ፡`
-        : `📚 **NEW COURSE MODULE AVAILABLE**\n\n• **Department:** ${cleanDept}\n• **Module:** ${title}\n\nTap below to download:`;
+        : `📚 **NEW COURSE MODULE AVAILABLE**\n\n• **Department:** ${cleanDept}\n• **Module:** ${title}\n\nTap below to download directly to your chat:`;
 
       const dlKb = new InlineKeyboard().text(sLang === 'am' ? "⬇️ አውርድ (Download)" : "⬇️ Download Module", `dlmod_${moduleId}`);
       await bot.api.sendMessage(s.user_id, notifText, { parse_mode: 'Markdown', reply_markup: dlKb });
@@ -1622,12 +1611,10 @@ async function main() {
     await bot.api.deleteMyCommands({ scope: { type: 'all_group_chats' } });
     await bot.api.deleteMyCommands({ scope: { type: 'all_chat_administrators' } });
 
-    // Students only see /start
     await bot.api.setMyCommands([
       { command: 'start', description: 'Open Student Portal & Submit Receipt' }
     ], { scope: { type: 'all_private_chats' } });
 
-    // Staff/Admins only see /panel and /bind in group
     await bot.api.setMyCommands([
       { command: 'panel', description: 'Open Staff Command Center Dashboard' },
       { command: 'bind', description: 'Bind group as active staff panel' }
