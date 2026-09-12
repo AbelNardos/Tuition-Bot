@@ -26,11 +26,15 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception thrown:', err);
 });
 
-// Self keep-alive ping for Render
+// Self keep-alive ping for external web service
 setInterval(() => {
   const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
   if (RENDER_URL) {
-    https.get(`${RENDER_URL}/`, (res) => {}).on('error', (err) => {});
+    https.get(`${RENDER_URL}/`, (res) => {
+      console.log(`Keep-alive ping status: ${res.statusCode}`);
+    }).on('error', (err) => {
+      console.error('Keep-alive ping error:', err.message);
+    });
   }
 }, 8 * 60 * 1000);
 
@@ -39,19 +43,20 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// 🛡️ BULLETPROOF HTML ESCAPER - Prevents all Telegram parse crashes
+// HTML Escaper for Telegram Messages
 function escapeHtml(str) {
   if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// PDF Safe Text Cleaner (Strips emojis & unsupported chars to prevent crashes)
+function cleanForPDF(str) {
+  if (!str) return '';
+  return String(str).replace(/[^\x00-\x7F]/g, '').trim();
 }
 
 async function initDB() {
-  try {
-    await pool.query(`ALTER TABLE department_topics DROP CONSTRAINT IF EXISTS department_topics_pkey;`);
-  } catch (err) {}
+  try { await pool.query(`ALTER TABLE department_topics DROP CONSTRAINT IF EXISTS department_topics_pkey;`); } catch (err) {}
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS group_settings (
@@ -153,9 +158,7 @@ async function setPendingDepartment(userId, dept) {
 }
 
 async function clearPendingDepartment(userId) {
-  try {
-    await pool.query('UPDATE user_settings SET pending_department = NULL WHERE user_id = $1', [userId]);
-  } catch (err) {}
+  try { await pool.query('UPDATE user_settings SET pending_department = NULL WHERE user_id = $1', [userId]); } catch (err) {}
 }
 
 async function getStaffPendingModuleDept(userId) {
@@ -173,9 +176,7 @@ async function setStaffPendingModuleDept(userId, dept) {
 }
 
 async function clearStaffPendingModuleDept(userId) {
-  try {
-    await pool.query('UPDATE user_settings SET pending_module_dept = NULL WHERE user_id = $1', [userId]);
-  } catch (err) {}
+  try { await pool.query('UPDATE user_settings SET pending_module_dept = NULL WHERE user_id = $1', [userId]); } catch (err) {}
 }
 
 async function isStaff(ctx) {
@@ -202,7 +203,6 @@ bot.use(async (ctx, next) => {
   await next();
 });
 
-// AESTHETIC HTML STRINGS
 const STRINGS = {
   en: {
     portalWelcome: "👋 <b>Welcome to Renaissance Global Student Portal</b>\n━━━━━━━━━━━━━━━━━━━━\n\n🎯 <b>Quick Guide:</b>\n1️⃣ Select your payment type & department\n2️⃣ Upload a clear photo of your receipt\n3️⃣ Receive your official approval slip instantly upon verification!\n\n<i>Select an option below to begin:</i>",
@@ -235,6 +235,7 @@ const STRINGS = {
     helpText: "❓ <b>እርዳታ ይፈልጋሉ?</b>\n\nበትምህርት ክፍያ ወይም በትምህርት ክፍል ምዝገባ ላይ ችግር ካለዎት፣ እባክዎን የሬጅስትራር ቢሮውን ያነጋግሩ።"
   }
 };
+
 const REJECTION_REASONS = [
   { label: "📷 Blurry/Unreadable Receipt", code: "blurry", message_en: "Please ensure your receipt image is clear, fully visible, and uncropped.", message_am: "እባክዎን የደረሰኝዎ ፎቶ ግልጽ እና ሙሉ በሙሉ የሚታይ መሆኑን አረጋግተው እንደገና ይላኩ።" },
   { label: "💵 Incorrect Amount Paid", code: "amount", message_en: "The payment amount does not match your required tuition fees.", message_am: "የተከፈለው የገንዘብ መጠን ከተፈለገው የትምህርት ክፍያ ጋር አይመሳሰልም።" },
@@ -327,37 +328,82 @@ function getRejectionReasonKeyboard(userId, topicId) {
   REJECTION_REASONS.forEach((r) => kb.text(r.label, `confirmrej_${userId}_${topicId}_${r.code}`).row());
   return kb;
 }
+// PDF Safe Text Cleaner (Strips emojis & unsupported chars to prevent crashes)
+function cleanForPDF(str) {
+  if (!str) return '';
+  // Removes any non-standard ASCII characters (like emojis) so PDFKit doesn't crash
+  return String(str).replace(/[^\x00-\x7F]/g, '').trim();
+}
 
-// GENERATE APPROVAL PDF WITH EMBEDDED LIVE VERIFICATION QR CODE
-async function generateApprovalPDF(userId, username, department, staffName, botUsername) {
+// GENERATE APPROVAL PDF WITH LOGO, WEBSITE, AND BOTTOM QR CODE
+async function generateApprovalPDF(userId, username, department, staffName, botUsername, lang = 'en') {
   return new Promise(async (resolve, reject) => {
     try {
-      const doc = new PDFDocument({ margin: 50 });
+      const doc = new PDFDocument({ margin: 50, size: 'A4' });
       const filePath = path.join(__dirname, `approval_slip_${userId}.pdf`);
       const stream = fs.createWriteStream(filePath);
       doc.pipe(stream);
 
-      // Header
-      doc.fontSize(20).text('RENAISSANCE GLOBAL', { align: 'center' });
-      doc.fontSize(14).text('Official Tuition Verification Slip', { align: 'center' });
+      // Clean variables for PDF compatibility
+      const safeUsername = cleanForPDF(username || 'N/A');
+      const safeStaff = cleanForPDF(staffName || 'Finance Team');
+      const safeDept = cleanForPDF(department);
+
+      // 1. ADD LOGO (Checks if logo.png or logo.jpg exists in folder)
+      const logoPng = path.join(__dirname, 'logo.png');
+      const logoJpg = path.join(__dirname, 'logo.jpg');
+      let logoPath = null;
+      if (fs.existsSync(logoPng)) logoPath = logoPng;
+      else if (fs.existsSync(logoJpg)) logoPath = logoJpg;
+
+      if (logoPath) {
+        // Center the logo (A4 width is 595.28, logo width 120 -> X = 237.64)
+        doc.image(logoPath, (doc.page.width - 120) / 2, 40, { width: 120 });
+        doc.moveDown(6); 
+      } else {
+        doc.moveDown(3);
+      }
+
+      // 2. HEADER & WEBSITE
+      doc.font('Helvetica-Bold').fontSize(22).text('RENAISSANCE GLOBAL', { align: 'center' });
+      doc.font('Helvetica').fontSize(11).text('College of Open & Virtual Learning', { align: 'center' });
+      doc.fillColor('#0056b3').text('http://reguovle.edu.et/', { align: 'center', link: 'http://reguovle.edu.et/' });
       doc.moveDown(2);
 
-      // Verification QR Code
-      const qrData = botUsername ? `https://t.me/${botUsername}?start=verify_${userId}` : `RENAISSANCE_GLOBAL_VERIFY:${userId}`;
-      const qrBuffer = await QRCode.toBuffer(qrData, { width: 100, margin: 1 });
-      doc.image(qrBuffer, 440, 110, { width: 95 });
-      doc.fontSize(8).text('Scan with camera to verify live clearance', 430, 210, { width: 115, align: 'center' });
+      doc.fillColor('#000000').font('Helvetica-Bold').fontSize(16).text('OFFICIAL TUITION VERIFICATION SLIP', { align: 'center' });
+      doc.moveDown(2);
 
-      // Student and Receipt Details
-      doc.fontSize(12);
-      doc.text(`Student ID: ${userId}`);
-      doc.text(`Username: @${username}`);
-      doc.text(`Department: ${department}`);
-      doc.text(`Status: APPROVED & CLEARED`);
-      doc.text(`Processed By: ${staffName}`);
-      doc.text(`Issue Date: ${new Date().toLocaleString()}`);
-      doc.moveDown(4);
-      doc.fontSize(10).text('This is an official computer-generated tuition verification slip from the Renaissance Global Student Portal. Any alterations invalidate this document.', { align: 'center' });
+      // 3. STUDENT & RECEIPT DETAILS (Centered)
+      doc.font('Helvetica').fontSize(13).lineGap(8);
+      doc.text(`Student ID: ${userId}`, { align: 'center' });
+      doc.text(`Username: @${safeUsername}`, { align: 'center' });
+      doc.text(`Department: ${safeDept}`, { align: 'center' });
+      
+      doc.moveDown(1);
+      doc.font('Helvetica-Bold').fillColor('#28a745').text(`STATUS: APPROVED & CLEARED`, { align: 'center' });
+      doc.fillColor('#000000').font('Helvetica');
+      doc.text(`Processed By: ${safeStaff}`, { align: 'center' });
+      
+      // Adapt date format based on user language preference
+      const issueDate = lang === 'am' 
+        ? new Date().toLocaleDateString('am-ET', { year: 'numeric', month: 'long', day: 'numeric' }) 
+        : new Date().toLocaleString();
+      doc.text(`Issue Date: ${issueDate}`, { align: 'center' });
+      
+      doc.moveDown(3);
+
+      // 4. GENERATE & EMBED QR CODE AT THE BOTTOM CENTER
+      const qrData = botUsername ? `https://t.me/${botUsername}?start=verify_${userId}` : `RENAISSANCE_GLOBAL_VERIFY:${userId}`;
+      const qrBuffer = await QRCode.toBuffer(qrData, { width: 120, margin: 1 });
+      
+      const qrX = (doc.page.width - 120) / 2;
+      doc.image(qrBuffer, qrX, doc.y);
+      doc.moveDown(9);
+
+      // 5. FOOTER TEXT
+      doc.fontSize(9).fillColor('#555555').text('Scan the QR code with any camera to verify the live clearance status of this student directly through the official Telegram portal.', { align: 'center' });
+      doc.moveDown(1);
+      doc.fontSize(8).text('Any alterations or unauthorized reproductions invalidate this document.', { align: 'center' });
 
       doc.end();
       stream.on('finish', () => resolve(filePath));
@@ -462,7 +508,6 @@ bot.command('bind', async (ctx) => {
   await pool.query(`INSERT INTO group_settings (group_id, is_active) VALUES ($1, TRUE) ON CONFLICT (group_id) DO UPDATE SET is_active = TRUE, updated_at = CURRENT_TIMESTAMP`, [groupId]);
   await ctx.reply("✅ <b>Group Bound Successfully!</b>\n\nThis group is now registered as the active Staff Panel.", { parse_mode: 'HTML' });
 });
-
 // STUDENT /start COMMAND
 bot.command('start', async (ctx) => {
   // Live camera scan verification
@@ -485,6 +530,7 @@ bot.command('start', async (ctx) => {
     await ctx.reply("🌐 <b>Please select your language / እባክዎን ቋንቋ ይምረጡ:</b>", { parse_mode: 'HTML', reply_markup: langKb });
   }
 });
+
 // UNIVERSAL STAFF /panel (WORKS IN BOTH SUPERGROUP & PRIVATE DM)
 bot.command('panel', async (ctx) => {
   const authorized = await isStaff(ctx);
@@ -692,7 +738,7 @@ bot.callbackQuery(/^roster_(.+)$/, async (ctx) => {
   if (res.rows.length === 0) return ctx.editMessageText(isAll ? "ℹ️ No approved students registered yet." : `ℹ️ No approved students found in <b>${escapeHtml(cleanDept)}</b>.`, { parse_mode: 'HTML' });
 
   const headerTitle = isAll ? "ALL DEPARTMENTS" : cleanDept.toUpperCase();
-  let text = `🎓 <b>APPROVED ROSTER — ${escapeHtml(headerTitle)}</b> (${res.rows.length} Total)\n━━━━━━━━━━━━━━━━━━━━\n`;
+  let text = `🎓 <b>APPROVED ROSTER — ${escapeHtml(headerTitle)}</b> (${res.rows.length} Total)\n\n`;
   let currentGroupDept = "";
 
   for (let idx = 0; idx < res.rows.length; idx++) {
@@ -856,7 +902,7 @@ bot.callbackQuery('cmd_download_pdf', async (ctx) => {
   const { department, username, processed_by } = res.rows[0];
   const botUsername = ctx.me?.username;
   try {
-    const pdfPath = await generateApprovalPDF(userId, username || 'N/A', department, processed_by || 'Finance Team', botUsername);
+    const pdfPath = await generateApprovalPDF(userId, username || 'N/A', department, processed_by || 'Finance Team', botUsername, lang);
     await ctx.replyWithDocument(new InputFile(pdfPath, `Tuition_Approval_Slip_${userId}.pdf`), { caption: STRINGS[lang].approvedMsg, parse_mode: 'HTML' });
     if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
   } catch (err) {
@@ -981,7 +1027,6 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
   await ctx.editMessageText(STRINGS[lang].sendReceiptPrompt.replace('{dept}', escapeHtml(fullTaggedDept)), { parse_mode: 'HTML' });
 });
 
-// COMMAND-BASED MODULE UPLOAD (/module Marketing Management | Title)
 bot.command(['module', 'uploadmodule'], async (ctx) => {
   if (!(await isStaff(ctx))) return;
   const staffGroupId = await getActiveStaffGroupId();
@@ -1003,7 +1048,8 @@ bot.command(['module', 'uploadmodule'], async (ctx) => {
     });
 
     const insRes = await pool.query("INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4) RETURNING id", [dept, title, vaultMsg.document.file_id, doc.file_name || `${title}.pdf`]);
-    
+    const newModId = insRes.rows[0].id;
+
     if (ctx.chat.type !== 'private' && ctx.message.message_thread_id !== vaultTopicId) {
       try {
         await ctx.deleteMessage();
@@ -1011,7 +1057,7 @@ bot.command(['module', 'uploadmodule'], async (ctx) => {
       } catch (e) {}
     }
 
-    const notifyKb = new InlineKeyboard().text("📢 Notify Enrolled Students", `notify_mod_${insRes.rows[0].id}`).row().text("🔕 Silent Upload", "dismiss_mod_notify");
+    const notifyKb = new InlineKeyboard().text("📢 Notify Enrolled Students", `notify_mod_${newModId}`).row().text("🔕 Silent Upload", "dismiss_mod_notify");
     await ctx.reply(`✅ <b>Module Stashed in Vault!</b>\n• Department: ${escapeHtml(dept)}\n• Title: ${escapeHtml(title)}\n\nBroadcast to enrolled students?`, { parse_mode: 'HTML', reply_markup: notifyKb });
   } catch (err) {
     ctx.reply(`❌ Failed: ${err.message}`);
@@ -1209,10 +1255,12 @@ async function main() {
     await bot.api.deleteMyCommands({ scope: { type: 'all_group_chats' } });
     await bot.api.deleteMyCommands({ scope: { type: 'all_chat_administrators' } });
 
+    // Students only see /start
     await bot.api.setMyCommands([
       { command: 'start', description: 'Open Student Portal & Submit Receipt' }
     ], { scope: { type: 'all_private_chats' } });
 
+    // Staff/Admins only see /panel and /bind in group
     await bot.api.setMyCommands([
       { command: 'panel', description: 'Open Staff Command Center Dashboard' },
       { command: 'bind', description: 'Bind group as active staff panel' }
