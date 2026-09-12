@@ -26,15 +26,11 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception thrown:', err);
 });
 
-// Self keep-alive ping for external web service
+// Self keep-alive ping for Render
 setInterval(() => {
   const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
   if (RENDER_URL) {
-    https.get(`${RENDER_URL}/`, (res) => {
-      console.log(`Keep-alive ping status: ${res.statusCode}`);
-    }).on('error', (err) => {
-      console.error('Keep-alive ping error:', err.message);
-    });
+    https.get(`${RENDER_URL}/`, (res) => {}).on('error', (err) => {});
   }
 }, 8 * 60 * 1000);
 
@@ -43,13 +39,16 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// HTML Escaper for Telegram Messages
+// 🛡️ BULLETPROOF HTML ESCAPER - Prevents all Telegram parse crashes
 function escapeHtml(str) {
   if (!str) return '';
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
-// PDF Safe Text Cleaner (Strips emojis & unsupported chars to prevent crashes)
+// PDF Safe Text Cleaner (Strips unsupported chars to prevent crashes)
 function cleanForPDF(str) {
   if (!str) return '';
   return String(str).replace(/[^\x00-\x7F]/g, '').trim();
@@ -203,6 +202,7 @@ bot.use(async (ctx, next) => {
   await next();
 });
 
+// AESTHETIC HTML STRINGS
 const STRINGS = {
   en: {
     portalWelcome: "👋 <b>Welcome to Renaissance Global Student Portal</b>\n━━━━━━━━━━━━━━━━━━━━\n\n🎯 <b>Quick Guide:</b>\n1️⃣ Select your payment type & department\n2️⃣ Upload a clear photo of your receipt\n3️⃣ Receive your official approval slip instantly upon verification!\n\n<i>Select an option below to begin:</i>",
@@ -235,7 +235,6 @@ const STRINGS = {
     helpText: "❓ <b>እርዳታ ይፈልጋሉ?</b>\n\nበትምህርት ክፍያ ወይም በትምህርት ክፍል ምዝገባ ላይ ችግር ካለዎት፣ እባክዎን የሬጅስትራር ቢሮውን ያነጋግሩ።"
   }
 };
-
 const REJECTION_REASONS = [
   { label: "📷 Blurry/Unreadable Receipt", code: "blurry", message_en: "Please ensure your receipt image is clear, fully visible, and uncropped.", message_am: "እባክዎን የደረሰኝዎ ፎቶ ግልጽ እና ሙሉ በሙሉ የሚታይ መሆኑን አረጋግተው እንደገና ይላኩ።" },
   { label: "💵 Incorrect Amount Paid", code: "amount", message_en: "The payment amount does not match your required tuition fees.", message_am: "የተከፈለው የገንዘብ መጠን ከተፈለገው የትምህርት ክፍያ ጋር አይመሳሰልም።" },
@@ -328,82 +327,156 @@ function getRejectionReasonKeyboard(userId, topicId) {
   REJECTION_REASONS.forEach((r) => kb.text(r.label, `confirmrej_${userId}_${topicId}_${r.code}`).row());
   return kb;
 }
-// PDF Safe Text Cleaner (Strips emojis & unsupported chars to prevent crashes)
+
+// GENERATE BEAUTIFUL APPROVAL PDF WITH LOGO, BORDERS & QR CODE
+// PDF Safe Text Cleaner (Strips unsupported chars to prevent crashes)
 function cleanForPDF(str) {
   if (!str) return '';
-  // Removes any non-standard ASCII characters (like emojis) so PDFKit doesn't crash
   return String(str).replace(/[^\x00-\x7F]/g, '').trim();
 }
 
-// GENERATE APPROVAL PDF WITH LOGO, WEBSITE, AND BOTTOM QR CODE
+// EXECUTIVE ACADEMIC CERTIFICATE PDF GENERATOR
 async function generateApprovalPDF(userId, username, department, staffName, botUsername, lang = 'en') {
   return new Promise(async (resolve, reject) => {
     try {
-      const doc = new PDFDocument({ margin: 50, size: 'A4' });
+      // 0 margin allows drawing full-bleed decorative certificate borders
+      const doc = new PDFDocument({ margin: 0, size: 'A4' });
       const filePath = path.join(__dirname, `approval_slip_${userId}.pdf`);
       const stream = fs.createWriteStream(filePath);
       doc.pipe(stream);
 
-      // Clean variables for PDF compatibility
-      const safeUsername = cleanForPDF(username || 'N/A');
-      const safeStaff = cleanForPDF(staffName || 'Finance Team');
-      const safeDept = cleanForPDF(department);
+      const pw = doc.page.width;   // 595.28 pt
+      const ph = doc.page.height;  // 841.89 pt
 
-      // 1. ADD LOGO (Checks if logo.png or logo.jpg exists in folder)
-      const logoPng = path.join(__dirname, 'logo.png');
-      const logoJpg = path.join(__dirname, 'logo.jpg');
+      // --- 1. STYLED DIPLOMA BORDERS WITH CORNER ORNAMENTS ---
+      // Outer Deep Navy Border
+      doc.rect(20, 20, pw - 40, ph - 40).lineWidth(3).stroke('#0B2545');
+      // Inner Gold Border
+      doc.rect(26, 26, pw - 52, ph - 52).lineWidth(1).stroke('#C59B27');
+
+      // Decorative Gold Corner Brackets
+      const cSize = 18;
+      // Top-Left Corner
+      doc.moveTo(32, 32 + cSize).lineTo(32, 32).lineTo(32 + cSize, 32).lineWidth(2).stroke('#C59B27');
+      // Top-Right Corner
+      doc.moveTo(pw - 32 - cSize, 32).lineTo(pw - 32, 32).lineTo(pw - 32, 32 + cSize).lineWidth(2).stroke('#C59B27');
+      // Bottom-Left Corner
+      doc.moveTo(32, ph - 32 - cSize).lineTo(32, ph - 32).lineTo(32 + cSize, ph - 32).lineWidth(2).stroke('#C59B27');
+      // Bottom-Right Corner
+      doc.moveTo(pw - 32 - cSize, ph - 32).lineTo(pw - 32, ph - 32).lineTo(pw - 32, ph - 32 - cSize).lineWidth(2).stroke('#C59B27');
+
+      // --- 2. LOGO INTEGRATION (Zero Overlap) ---
+      const extensions = ['logo.png', 'logo.jpg', 'logo.jpeg', 'Logo.png', 'Logo.jpg'];
       let logoPath = null;
-      if (fs.existsSync(logoPng)) logoPath = logoPng;
-      else if (fs.existsSync(logoJpg)) logoPath = logoJpg;
-
-      if (logoPath) {
-        // Center the logo (A4 width is 595.28, logo width 120 -> X = 237.64)
-        doc.image(logoPath, (doc.page.width - 120) / 2, 40, { width: 120 });
-        doc.moveDown(6); 
-      } else {
-        doc.moveDown(3);
+      for (const ext of extensions) {
+        const p = path.join(__dirname, ext);
+        if (fs.existsSync(p)) {
+          logoPath = p;
+          break;
+        }
       }
 
-      // 2. HEADER & WEBSITE
-      doc.font('Helvetica-Bold').fontSize(22).text('RENAISSANCE GLOBAL', { align: 'center' });
-      doc.font('Helvetica').fontSize(11).text('College of Open & Virtual Learning', { align: 'center' });
-      doc.fillColor('#0056b3').text('http://reguovle.edu.et/', { align: 'center', link: 'http://reguovle.edu.et/' });
-      doc.moveDown(2);
+      let currentY = 40;
+      if (logoPath) {
+        const logoWidth = 90;
+        doc.image(logoPath, (pw - logoWidth) / 2, currentY, { width: logoWidth });
+        currentY = 140; // Strict breathing room below logo
+      } else {
+        currentY = 55;
+      }
 
-      doc.fillColor('#000000').font('Helvetica-Bold').fontSize(16).text('OFFICIAL TUITION VERIFICATION SLIP', { align: 'center' });
-      doc.moveDown(2);
+      // --- 3. COLLEGE HEADER & WEBSITE LINK ---
+      doc.font('Helvetica-Bold').fontSize(20).fillColor('#0B2545').text('RENAISSANCE GLOBAL', 0, currentY, { align: 'center', width: pw });
+      currentY += 24;
 
-      // 3. STUDENT & RECEIPT DETAILS (Centered)
-      doc.font('Helvetica').fontSize(13).lineGap(8);
-      doc.text(`Student ID: ${userId}`, { align: 'center' });
-      doc.text(`Username: @${safeUsername}`, { align: 'center' });
-      doc.text(`Department: ${safeDept}`, { align: 'center' });
-      
-      doc.moveDown(1);
-      doc.font('Helvetica-Bold').fillColor('#28a745').text(`STATUS: APPROVED & CLEARED`, { align: 'center' });
-      doc.fillColor('#000000').font('Helvetica');
-      doc.text(`Processed By: ${safeStaff}`, { align: 'center' });
-      
-      // Adapt date format based on user language preference
-      const issueDate = lang === 'am' 
-        ? new Date().toLocaleDateString('am-ET', { year: 'numeric', month: 'long', day: 'numeric' }) 
-        : new Date().toLocaleString();
-      doc.text(`Issue Date: ${issueDate}`, { align: 'center' });
-      
-      doc.moveDown(3);
+      doc.font('Helvetica').fontSize(10).fillColor('#475569').text('COLLEGE OF OPEN & VIRTUAL LEARNING', 0, currentY, { align: 'center', width: pw, characterSpacing: 1.5 });
+      currentY += 18;
 
-      // 4. GENERATE & EMBED QR CODE AT THE BOTTOM CENTER
+      // Website URL formatted exactly as requested
+      const urlX = (pw - 275) / 2;
+      doc.font('Helvetica').fontSize(9).fillColor('#475569').text('For more information, visit: ', urlX, currentY, { continued: true });
+      doc.font('Helvetica-Bold').fillColor('#0056b3').text('http://reguovle.edu.et/', { underline: true, link: 'http://reguovle.edu.et/' });
+      currentY += 24;
+
+      // Gold Divider Line
+      doc.moveTo(75, currentY).lineTo(pw - 75, currentY).lineWidth(1).stroke('#C59B27');
+      currentY += 18;
+
+      // --- 4. DOCUMENT TITLE (BOLD & UNDERLINED) ---
+      doc.font('Helvetica-Bold').fontSize(13.5).fillColor('#0B2545').text('OFFICIAL TUITION PAYMENT VERIFICATION SLIP', 0, currentY, { align: 'center', width: pw, underline: true, characterSpacing: 0.8 });
+      currentY += 28;
+
+      // --- 5. STUDENT INFORMATION CARD (Shaded with Dividers) ---
+      const cardY = currentY;
+      const cardHeight = 142;
+      doc.roundedRect(55, cardY, pw - 110, cardHeight, 6).fillAndStroke('#F8FAFC', '#CBD5E1');
+
+      currentY += 14;
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('#0B2545').text('ACADEMIC ENROLLMENT DETAILS', 0, currentY, { align: 'center', width: pw });
+      currentY += 16;
+      doc.moveTo(70, currentY).lineTo(pw - 70, currentY).lineWidth(0.5).stroke('#E2E8F0');
+      currentY += 12;
+
+      const leftX = 85;
+      const rightX = 225;
+
+      doc.font('Helvetica-Bold').fontSize(10.5).fillColor('#0F172A').text('Student ID:', leftX, currentY);
+      doc.font('Helvetica').fillColor('#1E293B').text(String(userId), rightX, currentY);
+      currentY += 20;
+
+      doc.font('Helvetica-Bold').text('Student Username:', leftX, currentY);
+      doc.font('Helvetica').text(`@${cleanForPDF(username || 'N/A')}`, rightX, currentY);
+      currentY += 20;
+
+      doc.font('Helvetica-Bold').text('Academic Program:', leftX, currentY);
+      doc.font('Helvetica').text(cleanForPDF(department), rightX, currentY, { width: 260 });
+      currentY += 22;
+
+      doc.font('Helvetica-Bold').text('Document Ref:', leftX, currentY);
+      doc.font('Helvetica').fillColor('#475569').text(`REF-RG2026-${userId}`, rightX, currentY);
+
+      // --- 6. CLEARANCE STATUS BANNER ---
+      currentY = cardY + cardHeight + 14;
+      doc.roundedRect(55, currentY, pw - 110, 44, 6).fillAndStroke('#ECFDF5', '#6EE7B7');
+
+      doc.font('Helvetica-Bold').fontSize(13).fillColor('#047857').text('STATUS: APPROVED & CLEARED', 0, currentY + 9, { align: 'center', width: pw });
+
+      // Clean ASCII English Date
+      const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      const d = new Date();
+      const cleanDate = `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+      doc.font('Helvetica').fontSize(8.5).fillColor('#065F46').text(`Verified by Finance Directorate (${cleanForPDF(staffName)}) • Issue Date: ${cleanDate}`, 0, currentY + 26, { align: 'center', width: pw });
+
+      // --- 7. QR CODE AT THE BOTTOM CENTER ---
+      currentY += 58;
       const qrData = botUsername ? `https://t.me/${botUsername}?start=verify_${userId}` : `RENAISSANCE_GLOBAL_VERIFY:${userId}`;
-      const qrBuffer = await QRCode.toBuffer(qrData, { width: 120, margin: 1 });
-      
-      const qrX = (doc.page.width - 120) / 2;
-      doc.image(qrBuffer, qrX, doc.y);
-      doc.moveDown(9);
+      const qrBuffer = await QRCode.toBuffer(qrData, { width: 110, margin: 1, color: { dark: '#0B2545', light: '#FFFFFF' } });
 
-      // 5. FOOTER TEXT
-      doc.fontSize(9).fillColor('#555555').text('Scan the QR code with any camera to verify the live clearance status of this student directly through the official Telegram portal.', { align: 'center' });
-      doc.moveDown(1);
-      doc.fontSize(8).text('Any alterations or unauthorized reproductions invalidate this document.', { align: 'center' });
+      const qrWidth = 105;
+      const qrX = (pw - qrWidth) / 2;
+      doc.image(qrBuffer, qrX, currentY, { width: qrWidth });
+      currentY += 112;
+
+      // QR Instructions (Bold & Underlined Header)
+      doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#0B2545').text('SCAN WITH SMARTPHONE CAMERA TO VERIFY AUTHENTICITY', 0, currentY, { align: 'center', width: pw, underline: true });
+      currentY += 13;
+      doc.font('Helvetica').fontSize(7.5).fillColor('#64748B').text('This official QR code verifies the live clearance status directly against the university registry.', 0, currentY, { align: 'center', width: pw });
+
+      // --- 8. OFFICIAL EMBLEM SEAL & SIGNATURE SECTION ---
+      const sealY = ph - 105;
+
+      // Left: Decorative University Seal Graphic
+      doc.circle(95, sealY + 20, 22).lineWidth(1.5).stroke('#C59B27');
+      doc.circle(95, sealY + 20, 19).lineWidth(0.5).stroke('#C59B27');
+      doc.font('Helvetica-Bold').fontSize(6).fillColor('#C59B27').text('OFFICIAL SEAL', 70, sealY + 18, { width: 50, align: 'center' });
+
+      // Right: Registrar Signature Line
+      doc.moveTo(pw - 210, sealY + 20).lineTo(pw - 60, sealY + 20).lineWidth(1).stroke('#0F172A');
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#0F172A').text('Registrar & Academic Affairs', pw - 210, sealY + 25, { width: 150, align: 'center' });
+      doc.font('Helvetica').fontSize(7.5).fillColor('#64748B').text('Authorized Directorate Sign-off', pw - 210, sealY + 37, { width: 150, align: 'center' });
+
+      // Fine-print Anti-Forgery Footer
+      doc.font('Helvetica').fontSize(6.8).fillColor('#94A3B8').text('Notice: Any unauthorized alteration, physical tampering, or digital forgery renders this certificate immediately void.', 40, ph - 42, { align: 'center', width: pw - 80 });
 
       doc.end();
       stream.on('finish', () => resolve(filePath));
@@ -515,12 +588,12 @@ bot.command('start', async (ctx) => {
     const verifyId = ctx.match.replace('verify_', '').trim();
     const check = await pool.query("SELECT department, status, rejection_reason, updated_at FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1", [verifyId]);
 
-    if (check.rows.length === 0) return ctx.reply(`⚠️ No official registration record found for Student ID: <code>${verifyId}</code>`, { parse_mode: 'HTML' });
+    if (check.rows.length === 0) return ctx.reply(`⚠️ No official registration record found for Student ID: <code>${escapeHtml(verifyId)}</code>`, { parse_mode: 'HTML' });
     const rec = check.rows[0];
     if (rec.status === 'APPROVED') {
-      return ctx.reply(`✅ <b>OFFICIAL TUITION CLEARANCE: VALID</b>\n━━━━━━━━━━━━━━━━━━━━\n• <b>Student ID:</b> <code>${verifyId}</code>\n• <b>Department:</b> ${escapeHtml(rec.department)}\n• <b>Status:</b> APPROVED & CLEARED\n• <b>Date:</b> ${new Date(rec.updated_at).toLocaleDateString()}\n\n<i>This student is officially cleared for campus entry and examinations.</i>`, { parse_mode: 'HTML' });
+      return ctx.reply(`✅ <b>OFFICIAL TUITION CLEARANCE: VALID</b>\n━━━━━━━━━━━━━━━━━━━━\n• <b>Student ID:</b> <code>${escapeHtml(verifyId)}</code>\n• <b>Department:</b> ${escapeHtml(rec.department)}\n• <b>Status:</b> APPROVED & CLEARED\n• <b>Date:</b> ${new Date(rec.updated_at).toLocaleDateString()}\n\n<i>This student is officially cleared for campus entry and examinations.</i>`, { parse_mode: 'HTML' });
     } else {
-      return ctx.reply(`🚨 <b>OFFICIAL VERIFICATION: INVALID / VOIDED SLIP</b>\n━━━━━━━━━━━━━━━━━━━━\n• <b>Student ID:</b> <code>${verifyId}</code>\n• <b>Department:</b> ${escapeHtml(rec.department)}\n• <b>Status:</b> ❌ ${rec.status}\n\n<blockquote>⚠️ <b>WARNING:</b> This slip has been revoked or rejected by administration. Do not accept this document!</blockquote>`, { parse_mode: 'HTML' });
+      return ctx.reply(`🚨 <b>OFFICIAL VERIFICATION: INVALID / VOIDED SLIP</b>\n━━━━━━━━━━━━━━━━━━━━\n• <b>Student ID:</b> <code>${escapeHtml(verifyId)}</code>\n• <b>Department:</b> ${escapeHtml(rec.department)}\n• <b>Status:</b> ❌ ${escapeHtml(rec.status)}\n\n<blockquote>⚠️ <b>WARNING:</b> This slip has been revoked or rejected by administration. Do not accept this document!</blockquote>`, { parse_mode: 'HTML' });
     }
   }
 
@@ -671,6 +744,7 @@ bot.callbackQuery(/^chgdept_(\d+)_(mkt|biz|acc|agri|ed|log|cancel)$/, async (ctx
 // INTERACTIVE /deletemodule MANAGER
 bot.command(['deletemodule', 'delmod'], async (ctx) => {
   if (!(await isStaff(ctx))) return;
+  await clearStaffPendingModuleDept(ctx.from.id);
   await ctx.reply("🗑 <b>Delete Course Module</b>\n\nSelect academic department:", { message_thread_id: ctx.message.message_thread_id, parse_mode: 'HTML', reply_markup: getDeleteModuleDepartmentKeyboard() });
 });
 
@@ -738,7 +812,7 @@ bot.callbackQuery(/^roster_(.+)$/, async (ctx) => {
   if (res.rows.length === 0) return ctx.editMessageText(isAll ? "ℹ️ No approved students registered yet." : `ℹ️ No approved students found in <b>${escapeHtml(cleanDept)}</b>.`, { parse_mode: 'HTML' });
 
   const headerTitle = isAll ? "ALL DEPARTMENTS" : cleanDept.toUpperCase();
-  let text = `🎓 <b>APPROVED ROSTER — ${escapeHtml(headerTitle)}</b> (${res.rows.length} Total)\n\n`;
+  let text = `🎓 <b>APPROVED ROSTER — ${escapeHtml(headerTitle)}</b> (${res.rows.length} Total)\n━━━━━━━━━━━━━━━━━━━━\n`;
   let currentGroupDept = "";
 
   for (let idx = 0; idx < res.rows.length; idx++) {
@@ -1255,12 +1329,10 @@ async function main() {
     await bot.api.deleteMyCommands({ scope: { type: 'all_group_chats' } });
     await bot.api.deleteMyCommands({ scope: { type: 'all_chat_administrators' } });
 
-    // Students only see /start
     await bot.api.setMyCommands([
       { command: 'start', description: 'Open Student Portal & Submit Receipt' }
     ], { scope: { type: 'all_private_chats' } });
 
-    // Staff/Admins only see /panel and /bind in group
     await bot.api.setMyCommands([
       { command: 'panel', description: 'Open Staff Command Center Dashboard' },
       { command: 'bind', description: 'Bind group as active staff panel' }
