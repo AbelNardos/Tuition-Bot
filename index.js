@@ -199,124 +199,129 @@ bot.use(async (ctx, next) => {
   await next();
 });
 
+// UI UPGRADE: Executive Dashboard Strings
 const STRINGS = {
   en: {
-    portalWelcome: "👋 <b>Welcome to Renaissance Global Student Portal</b>\n━━━━━━━━━━━━━━━━━━━━\n\n🎯 <b>Quick Guide:</b>\n1️⃣ Select your payment type & department\n2️⃣ Upload a clear photo of your receipt\n3️⃣ Receive your official approval slip instantly upon verification!\n\n<i>Select an option below to begin:</i>",
-    selectPlan: "💳 <b>Step 1 of 2: Select Payment Type</b>\n\nPlease choose your payment plan:",
-    selectDept: "📚 <b>Step 2 of 2: Select Your Department</b>\n\nPlease select your academic department below:",
-    receiptReceived: "✅ Your receipt has been successfully submitted and placed in the review queue. Track its progress anytime using 'Check Status'.",
-    sendReceiptPrompt: "✅ Selected Department: <b>{dept}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n📸 <b>Next Step:</b> Please send your receipt photo or screenshot.\n\n<i>Note: Ensure the transaction details are clear and readable.</i>",
-    reuploadPrompt: "🔄 <b>Re-submitting Receipt</b>\nPlease choose your payment plan to initiate a new submission:",
-    approvedMsg: "✅ <b>Receipt Verified & Approved!</b>\nYour payment has been successfully cleared by our finance team.",
-    rejectedMsg: "❌ <b>Receipt Needs Attention</b>\n\n<b>Reason:</b> {reason}\n\n{message}",
-    reuploadBtn: "🔄 Re-upload Receipt",
-    noFileErr: "⚠️ Please send an actual <b>photo or screenshot</b> of your payment receipt. Text-only messages cannot be processed as receipts.",
-    deptUpdated: "🔄 <b>Department Updated</b>\nYour receipt submission has been transferred to <b>{dept}</b>.",
-    pendingExists: "⚠️ <b>Active Submission Pending</b>\n\nYou already have a receipt under review. Check your live timeline status below.",
-    helpText: "❓ <b>Need Assistance?</b>\n\nIf you have issues regarding your tuition payments or department registration, please contact the registrar office directly or submit your payment receipt photo."
+    portalWelcome: "🏛 <b>RENAISSANCE GLOBAL</b> | <i>Portal</i>\n━━━━━━━━━━━━━━━━━━━━\n\n<blockquote><b>Welcome to your secure academic gateway.</b>\nClear your tuition to unlock course modules and campus access.</blockquote>\n\n<b>⚡️ SYSTEM SEQUENCE:</b>\n<code>[1]</code> Select payment type & department\n<code>[2]</code> Upload a pristine receipt photo\n<code>[3]</code> Obtain your official QR clearance\n\n👇 <i>Awaiting input...</i>",
+    selectPlan: "💳 <b>TRANSACTION PROTOCOL (1/2)</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>Please select your active payment plan tier.</blockquote>",
+    selectDept: "📚 <b>ACADEMIC PLACEMENT (2/2)</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>Target your designated academic department below.</blockquote>",
+    receiptReceived: "✅ <b>UPLOAD SECURED</b>\nYour document is securely queued. Monitor progress via <b>Track Status</b>.",
+    sendReceiptPrompt: "✅ <b>TARGET:</b> <code>{dept}</code>\n━━━━━━━━━━━━━━━━━━━━\n\n📸 <b>AWAITING MEDIA:</b> Transmit your receipt photo now.\n\n<blockquote><i>Note: Low-resolution or cropped images will be auto-rejected by the review team.</i></blockquote>",
+    reuploadPrompt: "🔄 <b>OVERRIDE SUBMISSION</b>\nSelect your payment plan to initiate a fresh upload:",
+    approvedMsg: "✅ <b>SYSTEM CLEARANCE APPROVED</b>\nYour tuition transaction has been verified by the Finance Office.",
+    rejectedMsg: "❌ <b>CLEARANCE DENIED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote><b>ERROR REASON:</b> {reason}</blockquote>\n\n{message}",
+    reuploadBtn: "🔄 INITIATE RE-UPLOAD",
+    noFileErr: "⚠️ <b>INVALID INPUT:</b> You must transmit an actual <b>photo or screenshot</b>. Text data is ignored.",
+    deptUpdated: "🔄 <b>DATABASE UPDATE</b>\nYour dossier has been successfully transferred to <b>{dept}</b>.",
+    pendingExists: "⚠️ <b>LOCKOUT: ACTIVE SUBMISSION</b>\n\nYou have a document currently under active staff review. Await resolution.",
+    helpText: "❓ <b>SUPPORT DIRECTORY</b>\n\n<blockquote>For technical faults or payment discrepancies, report directly to the central Registrar Office.</blockquote>"
   },
   am: {
-    portalWelcome: "👋 <b>እንኳን ወደ ሬነሳንስ ግሎባል የተማሪዎች ፖርታል በሰላም መጡ</b>\n━━━━━━━━━━━━━━━━━━━━\n\n🎯 <b>ፈጣን መመሪያ:</b>\n1️⃣ የክፍያ ዓይነትዎን እና ትምህርት ክፍልዎን ይምረጡ\n2️⃣ ግልጽ የሆነ የክፍያ ደረሰኝ ፎቶ ይላኩ\n3️⃣ ሲረጋገጥ ይፋዊ ማረጋገጫ ፒዲኤፍዎን ወዲያውኑ ይቀበሉ!\n\n<i>ለመጀመር ከታች ካሉት አማራጮች አንዱን ይምረጡ፡</i>",
-    selectPlan: "💳 <b>ደረጃ 1 ከ 2፡ የክፍያ ዓይነት ይምረጡ</b>\n\nእባክዎን የክፍያ መጠን ዓይነትዎን ይምረጡ፡",
-    selectDept: "📚 <b>ደረጃ 2 ከ 2፡ ትምህርት ክፍልዎን ይምረጡ</b>\n\nእባክዎን ትምህርት ክፍልዎን ከታች ካሉት ይምረጡ፡",
-    receiptReceived: "✅ ደረሰኝዎ በትክክል ተልኳል። 'የደረሰኙን ሁኔታ ያረጋግጡ' የሚለውን በመጫን ሂደቱን መከታተል ይችላሉ።",
-    sendReceiptPrompt: "✅ የተመረጠው ትምህርት ክፍል፡ <b>{dept}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n📸 <b>ቀጣይ እርምጃ:</b> እባክዎን የክፍያ ደረሰኝ ፎቶዎን ይላኩ።\n\n<i>ማሳሰቢያ፡ ፎቶው ግልጽ መሆኑን ያረጋግጡ።</i>",
-    reuploadPrompt: "🔄 <b>ደረሰኝ እንደገና መላክ</b>\nእባክዎን አዲስ ማመልከቻ ለመጀመር የክፍያ ዓይነትዎን ይምረጡ፡",
-    approvedMsg: "✅ <b>ደረሰኝዎ ተረጋግጦ ጸድቋል!</b>\nየክፍያ ማረጋገጫዎ ተፈቅዷል።",
-    rejectedMsg: "❌ <b>ደረሰኝዎ ማስተካከያ ይፈልጋል</b>\n\n<b>ምክንያት:</b> {reason}\n\n{message}",
+    portalWelcome: "🏛 <b>ሬነሳንስ ግሎባል</b> | <i>የተማሪ ፖርታል</i>\n━━━━━━━━━━━━━━━━━━━━\n\n<blockquote><b>እንኳን ወደ ተማሪዎች ማዕከል በሰላም መጡ።</b>\nሞጁሎችን ለማውረድ የክፍያዎን ሂደት ያጠናቅቁ።</blockquote>\n\n<b>⚡️ ዋና እርምጃዎች:</b>\n<code>[1]</code> የክፍያ ዓይነት እና ትምህርት ክፍል ይምረጡ\n<code>[2]</code> ግልጽ የሆነ ደረሰኝ ፎቶ ይላኩ\n<code>[3]</code> ይፋዊ ማረጋገጫ (QR) ይቀበሉ\n\n👇 <i>ለመጀመር ከታች ይምረጡ፡</i>",
+    selectPlan: "💳 <b>የክፍያ ሂደት (1/2)</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>እባክዎን የክፍያ መጠን ዓይነትዎን ይምረጡ፡</blockquote>",
+    selectDept: "📚 <b>የትምህርት ክፍል (2/2)</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>እባክዎን ትምህርት ክፍልዎን ይምረጡ፡</blockquote>",
+    receiptReceived: "✅ <b>ማመልከቻዎ ገብቷል</b>\nየላኩት ደረሰኝ ተመዝግቧል። 'ሁኔታውን እይ' በመጫን መከታተል ይችላሉ።",
+    sendReceiptPrompt: "✅ <b>የተመረጠው ክፍል፡</b> <code>{dept}</code>\n━━━━━━━━━━━━━━━━━━━━\n\n📸 <b>ቀጣይ እርምጃ፡</b> የክፍያ ደረሰኝ ፎቶዎን አሁን ይላኩ።\n\n<blockquote><i>ማሳሰቢያ፡ ብዥ ያለ ወይም የተቆረጠ ፎቶ ተቀባይነት የለውም።</i></blockquote>",
+    reuploadPrompt: "🔄 <b>እንደገና መላክ</b>\nአዲስ ማመልከቻ ለመጀመር የክፍያ ዓይነትዎን ይምረጡ፡",
+    approvedMsg: "✅ <b>ማረጋገጫዎ ጸድቋል</b>\nየክፍያ ማረጋገጫዎ በፋይናንስ ቢሮ ተቀባይነት አግኝቷል።",
+    rejectedMsg: "❌ <b>ማመልከቻዎ ውድቅ ተደርጓል</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote><b>ምክንያት:</b> {reason}</blockquote>\n\n{message}",
     reuploadBtn: "🔄 ደረሰኝ እንደገና ስቀል",
-    noFileErr: "⚠️ እባክዎን ትክክለኛ የክፍያ ደረሰኝ <b>ፎቶ ወይም ስክሪንሾት</b> ይላኩ። በጽሁፍ ብቻ የሚላክ መረጃ አይቀበልም።",
-    deptUpdated: "🔄 <b>ትምህርት ክፍል ተቀይሯል</b>\nየደረሰኝ ማመልከቻዎ ወደ <b>{dept}</b> ተዛውሯል።",
-    pendingExists: "⚠️ <b>አሁንም በሂደት ላይ ያለ ማመልከቻ አለ</b>\n\nቀደም ሲል የላኩት ደረሰኝ በመገምገም ላይ ይገኛል። ሁኔታውን ከታች ማየት ይችላሉ።",
-    helpText: "❓ <b>እርዳታ ይፈልጋሉ?</b>\n\nበትምህርት ክፍያ ወይም በትምህርት ክፍል ምዝገባ ላይ ጥያቄ ወይም ችግር ካለዎት፣ እባክዎን የሬጅስትራር ቢሮውን በቀጥታ ያነጋግሩ።"
+    noFileErr: "⚠️ <b>ስህተት:</b> እባክዎን ትክክለኛ የክፍያ ደረሰኝ <b>ፎቶ ወይም ስክሪንሾት</b> ይላኩ። ጽሁፍ አይቀበልም።",
+    deptUpdated: "🔄 <b>መረጃዎ ተስተካክሏል</b>\nየደረሰኝ ማመልከቻዎ ወደ <b>{dept}</b> ተዛውሯል።",
+    pendingExists: "⚠️ <b>በሂደት ላይ ያለ ማመልከቻ አለ</b>\n\nቀደም ሲል የላኩት ደረሰኝ በግምገማ ላይ ነው። መታየት እስኪያልቅ ይጠብቁ።",
+    helpText: "❓ <b>የድጋፍ ማዕከል</b>\n\n<blockquote>በክፍያ ወይም በምዝገባ ላይ ችግር ካለዎት፣ እባክዎን የሬጅስትራር ቢሮውን ያነጋግሩ።</blockquote>"
   }
 };
 
 const REJECTION_REASONS = [
-  { label: "📷 Blurry/Unreadable Receipt", code: "blurry", message_en: "Please ensure your receipt image is clear, fully visible, and uncropped, then click below to re-upload.", message_am: "እባክዎን የደረሰኝዎ ፎቶ ግልጽ እና ሙሉ በሙሉ የሚታይ መሆኑን አረጋግተው እንደገና ይላኩ።" },
-  { label: "💵 Incorrect Amount Paid", code: "amount", message_en: "The payment amount does not match your required tuition fees. Please verify your transaction details and re-upload the correct receipt.", message_am: "የተከፈለው የገንዘብ መጠን ከተፈለገው የትምህርት ክፍያ ጋር አይመሳሰልም።" },
-  { label: "🚫 Invalid/Fake Receipt", code: "invalid", message_en: "This receipt could not be verified by our finance team. Please submit an official bank transaction receipt.", message_am: "ይህ ደረሰኝ ሊረጋገጥ አልቻለም። እባክዎን ኦፊሴላዊ የባንክ ደረሰኝ ይላኩ።" },
-  { label: "👤 Name/ID Mismatch", code: "mismatch", message_en: "The name or Student ID on the receipt does not match your profile details. Please re-upload a receipt that matches your credentials or contact administration.", message_am: "በደረሰኙ ላይ ያለው ስም ወይም የተማሪ መታወቂያ ከተመዘገበው መረጃ ጋር አይመሳሰልም።" }
+  { label: "📷 BLURRY/UNREADABLE MEDIA", code: "blurry", message_en: "Please ensure your receipt image is clear, fully visible, and uncropped, then click below to re-upload.", message_am: "እባክዎን የደረሰኝዎ ፎቶ ግልጽ እና ሙሉ በሙሉ የሚታይ መሆኑን አረጋግተው እንደገና ይላኩ።" },
+  { label: "💵 TRANSACTION AMOUNT MISMATCH", code: "amount", message_en: "The payment amount does not match your required tuition fees. Please verify your transaction details and re-upload the correct receipt.", message_am: "የተከፈለው የገንዘብ መጠን ከተፈለገው የትምህርት ክፍያ ጋር አይመሳሰልም።" },
+  { label: "🚫 INVALID/UNVERIFIED RECEIPT", code: "invalid", message_en: "This receipt could not be verified by our finance team. Please submit an official bank transaction receipt.", message_am: "ይህ ደረሰኝ ሊረጋገጥ አልቻለም። እባክዎን ኦፊሴላዊ የባንክ ደረሰኝ ይላኩ።" },
+  { label: "👤 CREDENTIAL MISMATCH (NAME/ID)", code: "mismatch", message_en: "The name or Student ID on the receipt does not match your profile details. Please re-upload a receipt that matches your credentials or contact administration.", message_am: "በደረሰኙ ላይ ያለው ስም ወይም የተማሪ መታወቂያ ከተመዘገበው መረጃ ጋር አይመሳሰልም።" }
 ];
 
+// UI UPGRADE: Executive Action Keyboards
 function getPaymentTypeKeyboard(lang = 'en') {
   if (lang === 'am') {
-    return new InlineKeyboard().text("💳 መደበኛ (Regular)", "paytype_reg").row().text("🎓 የ 4 ዓመት (Complete)", "paytype_full");
+    return new InlineKeyboard().text("💳 መደበኛ (REGULAR)", "paytype_reg").row().text("🎓 የ 4 ዓመት (FULL COMPLETE)", "paytype_full");
   }
-  return new InlineKeyboard().text("💳 Regular Term", "paytype_reg").row().text("🎓 4-Year Complete", "paytype_full");
+  return new InlineKeyboard().text("💳 REGULAR TIER", "paytype_reg").row().text("🎓 FULL 4-YEAR TIER", "paytype_full");
 }
 
 function getDepartmentKeyboard(planType = 'reg') {
   const prefix = planType === 'full' ? 'deptfull_' : 'deptreg_';
   return new InlineKeyboard()
-    .text("📈 Marketing", `${prefix}Marketing Management`).text("💼 Business", `${prefix}Business Management`).row()
-    .text("📊 Accounting & Finance", `${prefix}Accounting and finance`).row()
-    .text("🌾 Agribusiness & VCM", `${prefix}Agribusiness and Value chain management`).row()
-    .text("📚 Ed. Planning & Mgmt", `${prefix}Educational planning and management`).row()
-    .text("🚚 Logistics & SCM", `${prefix}Logistics and Supply chain management`);
+    .text("📈 MARKETING", `${prefix}Marketing Management`).text("💼 BUSINESS", `${prefix}Business Management`).row()
+    .text("📊 ACCOUNTING & FINANCE", `${prefix}Accounting and finance`).row()
+    .text("🌾 AGRIBUSINESS & VCM", `${prefix}Agribusiness and Value chain management`).row()
+    .text("📚 ED. PLANNING & MGMT", `${prefix}Educational planning and management`).row()
+    .text("🚚 LOGISTICS & SCM", `${prefix}Logistics and Supply chain management`);
 }
 
 function getStaffKeyboard() {
   return new InlineKeyboard()
-    .text('🔍 Search Record', 'cmd_lookfor').text('👥 Approved Roster', 'cmd_approved_roster').row()
-    .text('📚 Upload Module', 'cmd_upload_module').text('🗑 Delete Module', 'cmd_delete_module').row()
-    .text('🔄 Change Dept', 'cmd_panel_changedept').text('⚠️ Revoke Approval', 'cmd_panel_revoke').row()
-    .text('📊 Stats Summary', 'cmd_stats').text('📈 Module Analytics', 'cmd_mod_analytics').row()
-    .text('📄 Export CSV', 'cmd_export').text('📢 Broadcast Alert', 'cmd_broadcast');
-}
-
-function getModuleDepartmentKeyboard() {
-  return new InlineKeyboard()
-    .text("📈 Marketing", "moddept_Marketing Management").text("💼 Business", "moddept_Business Management").row()
-    .text("📊 Accounting & Finance", "moddept_Accounting and finance").row()
-    .text("🌾 Agribusiness & VCM", "moddept_Agribusiness and Value chain management").row()
-    .text("📚 Ed. Planning & Mgmt", "moddept_Educational planning and management").row()
-    .text("🚚 Logistics & SCM", "moddept_Logistics and Supply chain management").row()
-    .text("🔙 Cancel", "moddept_cancel");
-}
-
-function getDeleteModuleDepartmentKeyboard() {
-  return new InlineKeyboard()
-    .text("📈 Marketing", "delmoddept_Marketing Management").text("💼 Business", "delmoddept_Business Management").row()
-    .text("📊 Accounting & Finance", "delmoddept_Accounting and finance").row()
-    .text("🌾 Agribusiness & VCM", "delmoddept_Agribusiness and Value chain management").row()
-    .text("📚 Ed. Planning & Mgmt", "delmoddept_Educational planning and management").row()
-    .text("🚚 Logistics & SCM", "delmoddept_Logistics and Supply chain management").row()
-    .text("🔙 Cancel", "delmoddept_cancel");
-}
-
-function getApprovedRosterKeyboard() {
-  return new InlineKeyboard()
-    .text("🌐 Every Student (All Depts)", "roster_all").row()
-    .text("📈 Marketing", "roster_Marketing Management").text("💼 Business", "roster_Business Management").row()
-    .text("📊 Accounting & Finance", "roster_Accounting and finance").row()
-    .text("🌾 Agribusiness & VCM", "roster_Agribusiness and Value chain management").row()
-    .text("📚 Ed. Planning & Mgmt", "roster_Educational planning and management").row()
-    .text("🚚 Logistics & SCM", "roster_Logistics and Supply chain management").row()
-    .text("🔙 Cancel", "roster_cancel");
+    .text('🟢 APPROVED DIRECTORY', 'cmd_approved_roster').text('🔍 SEARCH ID', 'cmd_lookfor').row()
+    .text('📂 UPLOAD MODULE', 'cmd_upload_module').text('🗑 MANAGE VAULT', 'cmd_delete_module').row()
+    .text('🔄 OVERRIDE DEPT', 'cmd_panel_changedept').text('⚠️ REVOKE STATUS', 'cmd_panel_revoke').row()
+    .text('📊 LIVE ANALYTICS', 'cmd_stats').text('📈 VAULT STATS', 'cmd_mod_analytics').row()
+    .text('📥 EXPORT DATABASE (CSV)', 'cmd_export').row()
+    .text('📢 BROADCAST SYSTEM ALERT', 'cmd_broadcast');
 }
 
 function getStudentKeyboard(lang = 'en', status = null) {
   const kb = new InlineKeyboard();
   const isAm = lang === 'am';
 
-  if (status === 'PENDING') kb.text(isAm ? '⏳ በግምገማ ላይ' : '⏳ Under Review', 'cmd_pending_info');
-  else if (status === 'APPROVED') kb.text(isAm ? '⬇️ ደረሰኝ አውርድ' : '⬇️ Download Slip', 'cmd_download_pdf');
-  else kb.text(isAm ? '📤 ደረሰኝ አስገባ' : '📤 Submit Payment', 'cmd_submit');
+  if (status === 'PENDING') kb.text(isAm ? '⏳ በግምገማ ላይ...' : '⏳ Review In Progress...', 'cmd_pending_info');
+  else if (status === 'APPROVED') kb.text(isAm ? '⬇️ የይለፍ ማረጋገጫ' : '⬇️ Download Clearance', 'cmd_download_pdf');
+  else kb.text(isAm ? '📤 ደረሰኝ አስገባ' : '📤 Transmit Receipt', 'cmd_submit');
 
-  kb.text(isAm ? '📌 ሁኔታውን እይ' : '📌 Check Status', 'cmd_status').row();
-  kb.text(isAm ? '📚 የትምህርት ሞጁሎች' : '📚 Course Modules', 'cmd_modules').row();
-  kb.text(isAm ? '📜 የክፍያ ታሪክ' : '📜 My History', 'cmd_history').text(isAm ? '❓ እገዛ' : '❓ Support', 'cmd_help');
+  kb.text(isAm ? '📌 ሁኔታውን እይ' : '📌 Track Status', 'cmd_status').row();
+  kb.text(isAm ? '📚 የትምህርት ሞጁሎች' : '📚 Access Vault', 'cmd_modules').row();
+  
+  kb.text(isAm ? '📜 የክፍያ ታሪክ' : '📜 Audit History', 'cmd_history')
+    .text(isAm ? '❓ እገዛ' : '❓ Get Support', 'cmd_help');
 
   return kb;
 }
 
+function getModuleDepartmentKeyboard() {
+  return new InlineKeyboard()
+    .text("📈 MARKETING", "moddept_Marketing Management").text("💼 BUSINESS", "moddept_Business Management").row()
+    .text("📊 ACCOUNTING & FINANCE", "moddept_Accounting and finance").row()
+    .text("🌾 AGRIBUSINESS & VCM", "moddept_Agribusiness and Value chain management").row()
+    .text("📚 ED. PLANNING & MGMT", "moddept_Educational planning and management").row()
+    .text("🚚 LOGISTICS & SCM", "moddept_Logistics and Supply chain management").row()
+    .text("🔙 CANCEL", "moddept_cancel");
+}
+
+function getDeleteModuleDepartmentKeyboard() {
+  return new InlineKeyboard()
+    .text("📈 MARKETING", "delmoddept_Marketing Management").text("💼 BUSINESS", "delmoddept_Business Management").row()
+    .text("📊 ACCOUNTING & FINANCE", "delmoddept_Accounting and finance").row()
+    .text("🌾 AGRIBUSINESS & VCM", "delmoddept_Agribusiness and Value chain management").row()
+    .text("📚 ED. PLANNING & MGMT", "delmoddept_Educational planning and management").row()
+    .text("🚚 LOGISTICS & SCM", "delmoddept_Logistics and Supply chain management").row()
+    .text("🔙 CANCEL", "delmoddept_cancel");
+}
+
+function getApprovedRosterKeyboard() {
+  return new InlineKeyboard()
+    .text("🌐 EVERY STUDENT (ALL DEPTS)", "roster_all").row()
+    .text("📈 MARKETING", "roster_Marketing Management").text("💼 BUSINESS", "roster_Business Management").row()
+    .text("📊 ACCOUNTING & FINANCE", "roster_Accounting and finance").row()
+    .text("🌾 AGRIBUSINESS & VCM", "roster_Agribusiness and Value chain management").row()
+    .text("📚 ED. PLANNING", "roster_Educational planning and management").row()
+    .text("🚚 LOGISTICS & SCM", "roster_Logistics and Supply chain management").row()
+    .text("🔙 CANCEL", "roster_cancel");
+}
+
 function getTransferKeyboard(userId, topicId) {
   return new InlineKeyboard()
-    .text("📈 Marketing Mgmt", `tr_${userId}_${topicId}_mkt`).text("💼 Business Mgmt", `tr_${userId}_${topicId}_biz`).row()
-    .text("🌾 Agribusiness & VCM", `tr_${userId}_${topicId}_agri`).text("📚 Ed. Planning", `tr_${userId}_${topicId}_ed`).row()
-    .text("📊 Accounting & Finance", `tr_${userId}_${topicId}_acc`).text("🚚 Logistics & SCM", `tr_${userId}_${topicId}_log`).row()
-    .text("🔙 Cancel Transfer", `canceltrans_${userId}_${topicId}`);
+    .text("📈 MARKETING", `tr_${userId}_${topicId}_mkt`).text("💼 BUSINESS", `tr_${userId}_${topicId}_biz`).row()
+    .text("🌾 AGRIBUSINESS", `tr_${userId}_${topicId}_agri`).text("📚 ED. PLANNING", `tr_${userId}_${topicId}_ed`).row()
+    .text("📊 ACCOUNTING", `tr_${userId}_${topicId}_acc`).text("🚚 LOGISTICS", `tr_${userId}_${topicId}_log`).row()
+    .text("🔙 CANCEL TRANSFER", `canceltrans_${userId}_${topicId}`);
 }
 
 function getRejectionReasonKeyboard(userId, topicId) {
@@ -324,6 +329,7 @@ function getRejectionReasonKeyboard(userId, topicId) {
   REJECTION_REASONS.forEach((r) => kb.text(r.label, `confirmrej_${userId}_${topicId}_${r.code}`).row());
   return kb;
 }
+
 async function generateApprovalPDF(userId, username, department, staffName, botUsername, lang = 'en') {
   return new Promise(async (resolve, reject) => {
     try {
@@ -467,7 +473,7 @@ async function getOrCreateModulesVaultTopic(ctx, targetGroupId) {
     return Number(cached.rows[0].modules_topic_id);
   }
 
-  const newTopic = await ctx.api.createForumTopic(targetGroupId, '📚 [Course Modules Vault]');
+  const newTopic = await ctx.api.createForumTopic(targetGroupId, '📚 [COURSE MODULES VAULT]');
   const topicId = newTopic.message_thread_id;
 
   await pool.query(
@@ -488,14 +494,16 @@ async function generateSummaryText(statusType) {
   `, [statusType]);
 
   const icon = statusType === 'APPROVED' ? '✅' : '❌';
-  let text = `📊 <b>${icon} ${statusType} RECEIPTS SUMMARY</b>\n\n`;
+  let text = `📊 <b>${icon} ${statusType} RECEIPTS DIRECTORY</b>\n━━━━━━━━━━━━━━━━━━━━\n`;
   if (res.rows.length === 0) {
-    text += `<i>No ${statusType.toLowerCase()} receipts recorded yet.</i>`;
+    text += `<blockquote><i>No ${statusType.toLowerCase()} records in database.</i></blockquote>`;
     return text;
   }
+  text += `<blockquote>`;
   res.rows.forEach((r) => {
-    text += `• <b>${escapeHtml(r.department)}</b>: ${r.count} student(s)\n`;
+    text += `• <b>${escapeHtml(r.department)}</b>: <code>${r.count}</code> student(s)\n`;
   });
+  text += `</blockquote>`;
   return text;
 }
 
@@ -508,7 +516,7 @@ async function sendCSVExport(staffGroupId, threadId, captionText) {
     `);
 
     if (res.rows.length === 0) {
-      return bot.api.sendMessage(staffGroupId, "⚠️ No receipts found to export.", { message_thread_id: threadId });
+      return bot.api.sendMessage(staffGroupId, "⚠️ <b>EMPTY DATABASE:</b> No receipts found to export.", { message_thread_id: threadId, parse_mode: 'HTML' });
     }
 
     let csv = "Student Telegram ID,Username,Department & Tag,Status,Rejection Reason,Processed By,Created At,Updated At\n";
@@ -529,7 +537,7 @@ async function sendCSVExport(staffGroupId, threadId, captionText) {
     );
   } catch (err) {
     console.error("Export error:", err);
-    await bot.api.sendMessage(staffGroupId, `❌ Export error: ${err.message}`, { message_thread_id: threadId });
+    await bot.api.sendMessage(staffGroupId, `❌ <b>SYSTEM ERROR:</b> ${err.message}`, { message_thread_id: threadId, parse_mode: 'HTML' });
   }
 }
 
@@ -547,20 +555,20 @@ async function performSearch(ctx, query, topicId) {
   );
 
   if (res.rows.length === 0) {
-    return ctx.reply(`🔍 No receipts found matching: <b>${escapeHtml(query)}</b>`, { 
+    return ctx.reply(`🔍 <b>DATABASE QUERY FAILED:</b> No records matching <code>${escapeHtml(query)}</code>`, { 
       message_thread_id: topicId, 
       parse_mode: 'HTML' 
     });
   }
 
-  let text = `🔍 <b>SEARCH RESULTS FOR:</b> <code>${escapeHtml(query)}</code> (${res.rows.length})\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+  let text = `🔍 <b>QUERY RESULTS:</b> <code>${escapeHtml(query)}</code> (${res.rows.length})\n━━━━━━━━━━━━━━━━━━━━\n\n`;
 
   res.rows.forEach((r, idx) => {
     let statusEmoji = r.status === 'APPROVED' ? "✅" : (r.status === 'REJECTED' ? "❌" : "⏳");
     const uname = r.username ? `@${r.username}` : "N/A";
-    const staff = r.processed_by ? ` (Staff: ${escapeHtml(r.processed_by)})` : "";
+    const staff = r.processed_by ? `\n   ↳ <i>Cleared By: ${escapeHtml(r.processed_by)}</i>` : "";
     
-    text += `${idx + 1}. ${statusEmoji} <b>${escapeHtml(r.department)}</b>\n   • ID: <code>${r.user_id}</code> (${escapeHtml(uname)})\n   • Status: <b>${r.status}</b>${staff}\n   • Updated: ${new Date(r.updated_at).toLocaleDateString()}\n\n`;
+    text += `<code>[${idx + 1}]</code> ${statusEmoji} <b>${escapeHtml(r.department)}</b>\n<blockquote>• <b>ID:</b> <code>${r.user_id}</code> (${escapeHtml(uname)})\n• <b>Status:</b> <b>${r.status}</b>${staff}\n• <b>Timestamp:</b> ${new Date(r.updated_at).toLocaleDateString()}</blockquote>\n\n`;
   });
 
   await ctx.reply(text, { message_thread_id: topicId, parse_mode: 'HTML' });
@@ -568,32 +576,32 @@ async function performSearch(ctx, query, topicId) {
 
 async function performBroadcast(ctx, topicId, broadcastMsg) {
   if (!broadcastMsg) {
-    return ctx.reply("⚠️ Broadcast text cannot be empty.", { message_thread_id: topicId });
+    return ctx.reply("⚠️ <b>ERROR:</b> Broadcast text payload cannot be empty.", { message_thread_id: topicId, parse_mode: 'HTML' });
   }
 
   const usersRes = await pool.query('SELECT DISTINCT user_id FROM tickets');
   let successCount = 0;
-  await ctx.reply(`📢 Starting broadcast to ${usersRes.rows.length} students...`, { message_thread_id: topicId });
+  await ctx.reply(`📢 <b>INITIATING SYSTEM BROADCAST:</b> Targeting <code>${usersRes.rows.length}</code> students...`, { message_thread_id: topicId, parse_mode: 'HTML' });
 
   for (const row of usersRes.rows) {
     try {
-      await bot.api.sendMessage(row.user_id, `📢 <b>ANNOUNCEMENT / ማስታወቂያ</b>\n━━━━━━━━━━━━━━━━━━━━\n\n${escapeHtml(broadcastMsg)}`, { parse_mode: 'HTML' });
+      await bot.api.sendMessage(row.user_id, `📢 <b>SYSTEM ANNOUNCEMENT / ማስታወቂያ</b>\n━━━━━━━━━━━━━━━━━━━━\n\n<blockquote>${escapeHtml(broadcastMsg)}</blockquote>`, { parse_mode: 'HTML' });
       successCount++;
     } catch (err) {}
   }
 
-  await ctx.reply(`✅ <b>Broadcast Complete</b>\n• Delivered successfully: ${successCount} students`, { message_thread_id: topicId, parse_mode: 'HTML' });
+  await ctx.reply(`✅ <b>BROADCAST TRANSMISSION COMPLETE</b>\n━━━━━━━━━━━━━━━━━━━━\n• <b>Delivered to:</b> <code>${successCount}</code> students`, { message_thread_id: topicId, parse_mode: 'HTML' });
 }
 
 bot.command('bind', async (ctx) => {
   if (ctx.chat.type === 'private') {
-    return ctx.reply("⚠️ This command must be executed inside a supergroup with topics/threads enabled.");
+    return ctx.reply("⚠️ <b>DENIED:</b> Execution requires a supergroup context with topics enabled.", { parse_mode: 'HTML' });
   }
 
   try {
     const member = await ctx.getChatMember(ctx.from.id);
     if (!['administrator', 'creator'].includes(member.status)) {
-      return ctx.reply("❌ Only group administrators can bind this group.");
+      return ctx.reply("❌ <b>DENIED:</b> Root administrator privileges required.", { parse_mode: 'HTML' });
     }
   } catch (err) {
     console.error("Error checking permissions:", err);
@@ -609,7 +617,7 @@ bot.command('bind', async (ctx) => {
   }
 
   await ctx.reply(
-    "✅ <b>Group Bound Successfully!</b>\n\nThis group is now registered as the active Staff Panel. All student receipt submissions and department topics will be automatically managed here.",
+    "✅ <b>COMMAND CENTER SECURED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>This group is now configured as the primary Staff Action Panel. All telemetry, receipt submissions, and database controls will route here.</blockquote>",
     { parse_mode: 'HTML' }
   );
 });
@@ -623,18 +631,18 @@ bot.command('start', async (ctx) => {
     );
 
     if (check.rows.length === 0) {
-      return ctx.reply(`⚠️ No official registration record found for Student ID: <code>${escapeHtml(verifyId)}</code>`, { parse_mode: 'HTML' });
+      return ctx.reply(`⚠️ <b>SYSTEM ERROR:</b> No official registration record found for UID <code>${escapeHtml(verifyId)}</code>`, { parse_mode: 'HTML' });
     }
 
     const rec = check.rows[0];
     if (rec.status === 'APPROVED') {
       return ctx.reply(
-        `✅ <b>OFFICIAL TUITION CLEARANCE: VALID</b>\n━━━━━━━━━━━━━━━━━━━━\n• <b>Student ID:</b> <code>${escapeHtml(verifyId)}</code>\n• <b>Department:</b> ${escapeHtml(rec.department)}\n• <b>Status:</b> APPROVED & CLEARED\n• <b>Date:</b> ${new Date(rec.updated_at).toLocaleDateString()}\n\n<i>This student is officially cleared for campus entry and examinations.</i>`,
+        `✅ <b>OFFICIAL CLEARANCE STATUS: VALID</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Student ID:</b> <code>${escapeHtml(verifyId)}</code>\n• <b>Department:</b> ${escapeHtml(rec.department)}\n• <b>Status:</b> APPROVED & CLEARED\n• <b>Timestamp:</b> ${new Date(rec.updated_at).toLocaleDateString()}</blockquote>\n\n<i>This student is officially verified for campus integration.</i>`,
         { parse_mode: 'HTML' }
       );
     } else {
       return ctx.reply(
-        `🚨 <b>OFFICIAL VERIFICATION: INVALID / VOIDED SLIP</b>\n━━━━━━━━━━━━━━━━━━━━\n• <b>Student ID:</b> <code>${escapeHtml(verifyId)}</code>\n• <b>Department:</b> ${escapeHtml(rec.department)}\n• <b>Status:</b> ❌ ${escapeHtml(rec.status)}\n\n<blockquote>⚠️ <b>WARNING:</b> This slip has been revoked or rejected by administration. Do not accept this document!</blockquote>`,
+        `🚨 <b>OFFICIAL CLEARANCE STATUS: INVALID / VOID</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Student ID:</b> <code>${escapeHtml(verifyId)}</code>\n• <b>Department:</b> ${escapeHtml(rec.department)}\n• <b>Status:</b> ❌ ${escapeHtml(rec.status)}</blockquote>\n\n⚠️ <b>CRITICAL WARNING:</b> This document is not authorized by administration. Confiscate or reject entry!`,
         { parse_mode: 'HTML' }
       );
     }
@@ -645,11 +653,11 @@ bot.command('start', async (ctx) => {
     await clearPendingDepartment(userId);
 
     const langKeyboard = new InlineKeyboard()
-      .text("🇬🇧 English", "lang_en")
+      .text("🇬🇧 ENGLISH", "lang_en")
       .text("🇪🇹 አማርኛ", "lang_am");
 
     await ctx.reply(
-      "🌐 <b>Please select your language / እባክዎን ቋንቋ ይምረጡ:</b>",
+      "🌐 <b>SYSTEM LOCALIZATION / ቋንቋ ይምረጡ:</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>Select your preferred interface language below to initialize the portal.</blockquote>",
       { parse_mode: 'HTML', reply_markup: langKeyboard }
     );
   }
@@ -663,7 +671,7 @@ bot.command('panel', async (ctx) => {
   if (authorized) {
     const topicId = ctx.message?.message_thread_id;
     return ctx.reply(
-      "⚙️ <b>RENAISSANCE GLOBAL — STAFF ACTION PANEL</b>\n━━━━━━━━━━━━━━━━━━━━\n\n<i>Select an action below:</i>",
+      "⚙️ <b>COMMAND CENTER ACTION PANEL</b>\n━━━━━━━━━━━━━━━━━━━━\n\n<i>Select a root administrative function below:</i>",
       {
         message_thread_id: topicId,
         parse_mode: 'HTML',
@@ -679,6 +687,7 @@ bot.command('panel', async (ctx) => {
     { parse_mode: 'HTML', reply_markup: getStudentKeyboard(lang, null) }
   );
 });
+
 async function executeRevoke(ctx, targetUserId, topicId) {
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `Staff`;
 
@@ -695,7 +704,7 @@ async function executeRevoke(ctx, targetUserId, topicId) {
   );
 
   if (updateRes.rowCount === 0) {
-    return ctx.reply(`⚠️ No approved record found to revoke for Student ID: <code>${targetUserId}</code>.`, { message_thread_id: topicId, parse_mode: 'HTML' });
+    return ctx.reply(`⚠️ <b>OVERRIDE FAILED:</b> No approved record found to revoke for UID <code>${targetUserId}</code>.`, { message_thread_id: topicId, parse_mode: 'HTML' });
   }
 
   const { department, panel_msg_id } = updateRes.rows[0];
@@ -710,8 +719,8 @@ async function executeRevoke(ctx, targetUserId, topicId) {
   }
 
   const notifMsg = studentLang === 'am'
-    ? `⚠️ <b>የውሳኔ ማስተካከያ ማሳሰቢያ</b>\n\nውድ ተማሪ፣ ለ<b>${escapeHtml(department)}</b> የተሰጠው የክፍያ ማረጋገጫ በስህተት በመጽደቁ ምክንያት ውድቅ ተደርጓል።\n\n❌ <b>ሁኔታ:</b> ውድቅ ተደርጓል (Revoked)\n<blockquote>📌 <b>ማሳሰቢያ:</b> ቀደም ሲል ያወረዱት ፒዲኤፍ ደረሰኝ በፈተና ወቅት ተቀባይነት የለውም።</blockquote>\n\n<i>እባክዎን ትክክለኛውን ደረሰኝ እንደገና ይላኩ።</i>`
-    : `⚠️ <b>NOTICE OF APPROVAL REVOCATION</b>\n\nDear Student,\nYour tuition approval for <b>${escapeHtml(department)}</b> has been revoked by administration due to an audit check / issued in error.\n\n❌ <b>Status:</b> REVOKED / REJECTED\n<blockquote>📌 <b>Warning:</b> Any previously printed or downloaded slip is now officially VOID.</blockquote>\n\n<i>Please re-upload your valid bank receipt below:</i>`;
+    ? `⚠️ <b>የውሳኔ ማስተካከያ ማሳሰቢያ</b>\n━━━━━━━━━━━━━━━━━━━━\nውድ ተማሪ፣ ለ<b>${escapeHtml(department)}</b> የተሰጠው የክፍያ ማረጋገጫ በስህተት በመጽደቁ ምክንያት ውድቅ ተደርጓል።\n\n<blockquote>❌ <b>ሁኔታ:</b> ውድቅ ተደርጓል (REVOKED)</blockquote>\n📌 <b>ማሳሰቢያ:</b> ቀደም ሲል ያወረዱት ፒዲኤፍ ደረሰኝ በፈተና ወቅት ተቀባይነት የለውም።\n\n<i>እባክዎን ትክክለኛውን ደረሰኝ እንደገና ይላኩ።</i>`
+    : `⚠️ <b>NOTICE OF APPROVAL REVOCATION</b>\n━━━━━━━━━━━━━━━━━━━━\nDear Student,\nYour tuition clearance for <b>${escapeHtml(department)}</b> has been revoked by administration following a system audit.\n\n<blockquote>❌ <b>STATUS:</b> REVOKED / REJECTED</blockquote>\n📌 <b>WARNING:</b> Any previously downloaded PDF slip is now officially VOID.\n\n<i>Please re-upload your valid bank receipt below:</i>`;
 
   const resubmitKb = new InlineKeyboard().text(STRINGS[studentLang].reuploadBtn, "start_resubmit");
   try {
@@ -719,7 +728,7 @@ async function executeRevoke(ctx, targetUserId, topicId) {
   } catch (e) {}
 
   await ctx.reply(
-    `✅ <b>Approval Revoked Successfully!</b>\n━━━━━━━━━━━━━━━━━━━━\n• <b>Student ID:</b> <code>${targetUserId}</code>\n• <b>Department:</b> ${escapeHtml(department)}\n• <b>Revoked by:</b> ${escapeHtml(staffName)}\n\n<i>Student has been notified, modules are re-locked, and any camera scan of their old PDF slip will now report VOID.</i>`,
+    `✅ <b>OVERRIDE SUCCESSFUL: STATUS REVOKED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Target UID:</b> <code>${targetUserId}</code>\n• <b>Department:</b> ${escapeHtml(department)}\n• <b>Authorized By:</b> ${escapeHtml(staffName)}</blockquote>\n\n<i>Student modules are locked. Live QR scans will now flag as VOID.</i>`,
     { message_thread_id: topicId, parse_mode: 'HTML' }
   );
 }
@@ -732,14 +741,14 @@ bot.command('revoke', async (ctx) => {
   let targetIdStr = ctx.message.text.replace(/^\/revoke/, '').trim();
 
   if (!targetIdStr && ctx.message.reply_to_message && ctx.message.reply_to_message.text) {
-    const match = ctx.message.reply_to_message.text.match(/Student ID:\s*`?(\d+)`?/i) || ctx.message.reply_to_message.text.match(/ID:\s*<code.*?>(\d+)<\/code>/i) || ctx.message.reply_to_message.text.match(/Student ID: (\d+)/i);
+    const match = ctx.message.reply_to_message.text.match(/Student ID:\s*`?(\d+)`?/i) || ctx.message.reply_to_message.text.match(/ID:\s*<code.*?>(\d+)<\/code>/i) || ctx.message.reply_to_message.text.match(/Student ID: (\d+)/i) || ctx.message.reply_to_message.text.match(/Target UID: <code.*?>(\d+)<\/code>/i) || ctx.message.reply_to_message.text.match(/Target UID:\s*`?(\d+)`?/i);
     if (match) targetIdStr = match[1];
   }
 
   const targetUserId = Number(targetIdStr);
   if (!targetUserId) {
     return ctx.reply(
-      "⚠️ <b>How to use:</b>\nType: <code>/revoke &lt;StudentID&gt;</code>\n*Example:* <code>/revoke 123456789</code>\n\n<i>(Or reply directly to any approved message with <code>/revoke</code>)</i>",
+      "⚠️ <b>SYNTAX ERROR:</b>\nType: <code>/revoke &lt;UID&gt;</code>\n*Example:* <code>/revoke 123456789</code>\n\n<i>(Alternatively, reply directly to an approved receipt with <code>/revoke</code>)</i>",
       { message_thread_id: topicId, parse_mode: 'HTML' }
     );
   }
@@ -752,7 +761,7 @@ bot.callbackQuery('cmd_panel_revoke', async (ctx) => {
   if (!(await isStaff(ctx))) return;
 
   await ctx.reply(
-    "⚠️ <b>Revoke Student Approval</b>\n\nReply directly to this message with the <b>Student ID</b> you want to revoke.",
+    "⚠️ <b>INITIATE STATUS REVOCATION</b>\n\n<i>Reply directly to this system message with the target <b>Student ID</b>.</i>",
     {
       message_thread_id: ctx.callbackQuery.message.message_thread_id,
       parse_mode: 'HTML',
@@ -768,22 +777,22 @@ async function executeChangeDeptPrompt(ctx, targetUserId, topicId) {
   );
 
   if (res.rows.length === 0) {
-    return ctx.reply(`⚠️ No approved record found for Student ID: <code>${targetUserId}</code>.`, { message_thread_id: topicId, parse_mode: 'HTML' });
+    return ctx.reply(`⚠️ <b>OVERRIDE FAILED:</b> No active clearance found for UID <code>${targetUserId}</code>.`, { message_thread_id: topicId, parse_mode: 'HTML' });
   }
 
   const { username, department } = res.rows[0];
 
   const kb = new InlineKeyboard()
-    .text("📈 Marketing", `chgdept_${targetUserId}_mkt`)
-    .text("💼 Business", `chgdept_${targetUserId}_biz`).row()
-    .text("📊 Accounting & Finance", `chgdept_${targetUserId}_acc`).row()
-    .text("🌾 Agribusiness & VCM", `chgdept_${targetUserId}_agri`).row()
-    .text("📚 Ed. Planning & Mgmt", `chgdept_${targetUserId}_ed`).row()
-    .text("🚚 Logistics & SCM", `chgdept_${targetUserId}_log`).row()
-    .text("🔙 Cancel", `chgdept_${targetUserId}_cancel`);
+    .text("📈 MARKETING", `chgdept_${targetUserId}_mkt`)
+    .text("💼 BUSINESS", `chgdept_${targetUserId}_biz`).row()
+    .text("📊 ACCOUNTING", `chgdept_${targetUserId}_acc`)
+    .text("🌾 AGRIBUSINESS", `chgdept_${targetUserId}_agri`).row()
+    .text("📚 ED. PLANNING", `chgdept_${targetUserId}_ed`)
+    .text("🚚 LOGISTICS", `chgdept_${targetUserId}_log`).row()
+    .text("🔙 ABORT CHANGE", `chgdept_${targetUserId}_cancel`);
 
   await ctx.reply(
-    `🔄 <b>Change Academic Placement</b>\n━━━━━━━━━━━━━━━━━━━━\n• <b>Student ID:</b> <code>${targetUserId}</code>\n• <b>Username:</b> @${escapeHtml(username) || 'N/A'}\n• <b>Current Dept:</b> ${escapeHtml(department)}\n\n<i>Select the new department below:</i>`,
+    `🔄 <b>MODIFY ACADEMIC PLACEMENT</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Target UID:</b> <code>${targetUserId}</code>\n• <b>User Alias:</b> @${escapeHtml(username) || 'N/A'}\n• <b>Current Assg:</b> ${escapeHtml(department)}</blockquote>\n\n<i>Select the new department parameter below:</i>`,
     { message_thread_id: topicId, parse_mode: 'HTML', reply_markup: kb }
   );
 }
@@ -796,14 +805,14 @@ bot.command(['changedept', 'changedep'], async (ctx) => {
   let targetIdStr = ctx.message.text.replace(/^\/(changedept|changedep)/, '').trim();
 
   if (!targetIdStr && ctx.message.reply_to_message && ctx.message.reply_to_message.text) {
-    const match = ctx.message.reply_to_message.text.match(/Student ID:\s*`?(\d+)`?/i) || ctx.message.reply_to_message.text.match(/ID:\s*<code.*?>(\d+)<\/code>/i) || ctx.message.reply_to_message.text.match(/Student ID: (\d+)/i);
+    const match = ctx.message.reply_to_message.text.match(/Student ID:\s*`?(\d+)`?/i) || ctx.message.reply_to_message.text.match(/ID:\s*<code.*?>(\d+)<\/code>/i) || ctx.message.reply_to_message.text.match(/Student ID: (\d+)/i) || ctx.message.reply_to_message.text.match(/Target UID: <code.*?>(\d+)<\/code>/i) || ctx.message.reply_to_message.text.match(/Target UID:\s*`?(\d+)`?/i);
     if (match) targetIdStr = match[1];
   }
 
   const targetUserId = Number(targetIdStr);
   if (!targetUserId) {
     return ctx.reply(
-      "⚠️ <b>How to use:</b>\nType: <code>/changedept &lt;StudentID&gt;</code>\n*Example:* <code>/changedept 123456789</code>\n\n<i>(Or reply directly to the student's approval slip with <code>/changedept</code>)</i>",
+      "⚠️ <b>SYNTAX ERROR:</b>\nType: <code>/changedept &lt;UID&gt;</code>\n*Example:* <code>/changedept 123456789</code>\n\n<i>(Alternatively, reply directly to an approved receipt with <code>/changedept</code>)</i>",
       { message_thread_id: topicId, parse_mode: 'HTML' }
     );
   }
@@ -816,7 +825,7 @@ bot.callbackQuery('cmd_panel_changedept', async (ctx) => {
   if (!(await isStaff(ctx))) return;
 
   await ctx.reply(
-    "🔄 <b>Change Student Placement</b>\n\nReply directly to this message with the <b>Student ID</b> to change their academic department.",
+    "🔄 <b>INITIATE DEPARTMENT OVERRIDE</b>\n\n<i>Reply directly to this system message with the target <b>Student ID</b>.</i>",
     {
       message_thread_id: ctx.callbackQuery.message.message_thread_id,
       parse_mode: 'HTML',
@@ -833,7 +842,7 @@ bot.callbackQuery(/^chgdept_(\d+)_(mkt|biz|acc|agri|ed|log|cancel)$/, async (ctx
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `Staff`;
 
   if (deptCode === 'cancel') {
-    return ctx.editMessageText("❌ Department change cancelled.");
+    return ctx.editMessageText("❌ <b>OPERATION ABORTED:</b> Department override cancelled.", { parse_mode: 'HTML' });
   }
 
   const deptMap = {
@@ -851,7 +860,7 @@ bot.callbackQuery(/^chgdept_(\d+)_(mkt|biz|acc|agri|ed|log|cancel)$/, async (ctx
   );
 
   if (ticketRes.rows.length === 0) {
-    return ctx.editMessageText("⚠️ Could not find approved ticket to update.");
+    return ctx.editMessageText("⚠️ <b>ERROR:</b> Target record no longer active/approved.", { parse_mode: 'HTML' });
   }
 
   const oldDept = ticketRes.rows[0].department || '';
@@ -864,15 +873,15 @@ bot.callbackQuery(/^chgdept_(\d+)_(mkt|biz|acc|agri|ed|log|cancel)$/, async (ctx
   );
 
   await ctx.editMessageText(
-    `✅ <b>Department Changed Successfully!</b>\n━━━━━━━━━━━━━━━━━━━━\n• <b>Student ID:</b> <code>${targetUserId}</code>\n• <b>New Department:</b> ${escapeHtml(newFullDept)}\n• <b>Updated by:</b> ${escapeHtml(staffName)}\n\n<i>Student's module library has been automatically switched to the new department.</i>`,
+    `✅ <b>DEPARTMENT OVERRIDE SUCCESSFUL</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Target UID:</b> <code>${targetUserId}</code>\n• <b>New Assignment:</b> ${escapeHtml(newFullDept)}\n• <b>Authorized By:</b> ${escapeHtml(staffName)}</blockquote>\n\n<i>The user's Module Vault has been automatically synced to the new assignment.</i>`,
     { parse_mode: 'HTML' }
   );
 
   try {
     const studentLang = await getUserLang(targetUserId);
     const notifMsg = studentLang === 'am'
-      ? `🔄 <b>የትምህርት ክፍልዎ ተቀይሯል</b>\n\nአዲሱ ክፍልዎ፡ <b>${escapeHtml(newFullDept)}</b>\nአሁን አዲሶቹን ሞጁሎች በ '📚 የትምህርት ሞጁሎች' ማውረድ ይችላሉ።`
-      : `🔄 <b>Academic Placement Updated</b>\n\nYour department has been officially updated to:\n👉 <b>${escapeHtml(newFullDept)}</b>\nAccess new course materials under <b>📚 Course Modules</b>!`;
+      ? `🔄 <b>የትምህርት ክፍልዎ ተቀይሯል</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>አዲሱ ክፍልዎ፡ <b>${escapeHtml(newFullDept)}</b></blockquote>\nአሁን አዲሶቹን ሞጁሎች በ <b>📚 የትምህርት ሞጁሎች</b> ማውረድ ይችላሉ።`
+      : `🔄 <b>ACADEMIC PLACEMENT UPDATED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>Your system profile has been transferred to:\n👉 <b>${escapeHtml(newFullDept)}</b></blockquote>\nAccess your new course materials under <b>📚 Access Vault</b>!`;
 
     await bot.api.sendMessage(targetUserId, notifMsg, { parse_mode: 'HTML' });
   } catch (err) {
@@ -887,7 +896,7 @@ bot.command(['deletemodule', 'delmod'], async (ctx) => {
   const topicId = ctx.message.message_thread_id;
 
   await ctx.reply(
-    "🗑 <b>Delete Course Module</b>\n\nSelect the academic department to view and remove modules:",
+    "🗑 <b>MANAGE VAULT PURGE</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>Select a departmental parameter to access its modules for deletion:</i>",
     { message_thread_id: topicId, parse_mode: 'HTML', reply_markup: getDeleteModuleDepartmentKeyboard() }
   );
 });
@@ -900,7 +909,7 @@ bot.callbackQuery('cmd_delete_module', async (ctx) => {
   await clearStaffPendingModuleDept(ctx.from.id);
 
   await ctx.reply(
-    "🗑 <b>Delete Course Module</b>\n\nSelect the academic department to view and remove modules:",
+    "🗑 <b>MANAGE VAULT PURGE</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>Select a departmental parameter to access its modules for deletion:</i>",
     { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML', reply_markup: getDeleteModuleDepartmentKeyboard() }
   );
 });
@@ -910,7 +919,7 @@ bot.callbackQuery(/^delmoddept_(.+)$/, async (ctx) => {
   const dept = ctx.match[1];
 
   if (dept === 'cancel') {
-    return ctx.editMessageText("❌ Module deletion cancelled.");
+    return ctx.editMessageText("❌ <b>OPERATION ABORTED:</b> Vault purge cancelled.", { parse_mode: 'HTML' });
   }
 
   const res = await pool.query(
@@ -919,17 +928,17 @@ bot.callbackQuery(/^delmoddept_(.+)$/, async (ctx) => {
   );
 
   if (res.rows.length === 0) {
-    return ctx.editMessageText(`ℹ️ No modules currently found for <b>${escapeHtml(dept)}</b>.`, { parse_mode: 'HTML' });
+    return ctx.editMessageText(`ℹ️ <b>VAULT EMPTY:</b> No documents located for <b>${escapeHtml(dept)}</b>.`, { parse_mode: 'HTML' });
   }
 
   const kb = new InlineKeyboard();
   res.rows.forEach((m) => {
-    kb.text(`🗑 ${m.title}`, `confirm_delmod_${m.id}`).row();
+    kb.text(`🗑 REMOVE: ${m.title.substring(0,25)}...`, `confirm_delmod_${m.id}`).row();
   });
-  kb.text("🔙 Cancel", "delmoddept_cancel");
+  kb.text("🔙 ABORT PROCESS", "delmoddept_cancel");
 
   await ctx.editMessageText(
-    `🗑 <b>Modules for ${escapeHtml(dept)}</b>\n\nTap any module below to permanently remove student access:`,
+    `🗑 <b>TARGET SECURED: ${escapeHtml(dept)}</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>Warning: Deleting a module instantly revokes access for all enrolled students. Select file to purge:</i>`,
     { parse_mode: 'HTML', reply_markup: kb }
   );
 });
@@ -944,13 +953,13 @@ bot.callbackQuery(/^confirm_delmod_(\d+)$/, async (ctx) => {
   );
 
   if (res.rowCount === 0) {
-    return ctx.editMessageText("⚠️ Module was already deleted or not found.");
+    return ctx.editMessageText("⚠️ <b>ERROR:</b> Document already purged or missing.", { parse_mode: 'HTML' });
   }
 
   const { title, department } = res.rows[0];
 
   await ctx.editMessageText(
-    `✅ <b>Module Deleted Successfully!</b>\n\n• <b>Title:</b> ${escapeHtml(title)}\n• <b>Department:</b> ${escapeHtml(department)}\n\n<i>This module is no longer accessible or downloadable by any student.</i>`,
+    `✅ <b>VAULT PURGE SUCCESSFUL</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Title:</b> ${escapeHtml(title)}\n• <b>Sector:</b> ${escapeHtml(department)}</blockquote>\n\n<i>Document has been permanently eradicated from student access.</i>`,
     { parse_mode: 'HTML' }
   );
 });
@@ -962,7 +971,7 @@ bot.command(['approved', 'students'], async (ctx) => {
   const topicId = ctx.message.message_thread_id;
 
   await ctx.reply(
-    "👥 <b>Approved Students Directory</b>\n\nSelect <b>'Every Student'</b> to see all approved students, or choose a specific department:",
+    "👥 <b>ACCESS APPROVED DIRECTORY</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>Filter database by departmental parameters:</i>",
     { message_thread_id: topicId, parse_mode: 'HTML', reply_markup: getApprovedRosterKeyboard() }
   );
 });
@@ -974,7 +983,7 @@ bot.callbackQuery('cmd_approved_roster', async (ctx) => {
   const topicId = ctx.callbackQuery.message.message_thread_id;
 
   await ctx.reply(
-    "👥 <b>Approved Students Directory</b>\n\nSelect <b>'Every Student'</b> to see all approved students, or choose a specific department:",
+    "👥 <b>ACCESS APPROVED DIRECTORY</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>Filter database by departmental parameters:</i>",
     { message_thread_id: topicId, parse_mode: 'HTML', reply_markup: getApprovedRosterKeyboard() }
   );
 });
@@ -984,7 +993,7 @@ bot.callbackQuery(/^roster_(.+)$/, async (ctx) => {
   const targetDept = ctx.match[1];
 
   if (targetDept === 'cancel') {
-    return ctx.editMessageText("❌ Roster view cancelled.");
+    return ctx.editMessageText("❌ <b>OPERATION ABORTED:</b> Directory search cancelled.", { parse_mode: 'HTML' });
   }
 
   const isAll = targetDept === 'all';
@@ -1013,13 +1022,13 @@ bot.callbackQuery(/^roster_(.+)$/, async (ctx) => {
 
   if (res.rows.length === 0) {
     const emptyMsg = isAll 
-      ? "ℹ️ No approved students registered yet."
-      : `ℹ️ No approved students found in <b>${escapeHtml(cleanDept)}</b>.`;
+      ? "ℹ️ <b>DATABASE EMPTY:</b> No approved records exist."
+      : `ℹ️ <b>DATABASE EMPTY:</b> No approved records in <b>${escapeHtml(cleanDept)}</b>.`;
     return ctx.editMessageText(emptyMsg, { parse_mode: 'HTML' });
   }
 
   const headerTitle = isAll ? "ALL DEPARTMENTS" : cleanDept.toUpperCase();
-  let text = `🎓 <b>APPROVED ROSTER — ${escapeHtml(headerTitle)}</b> (${res.rows.length} Total)\n━━━━━━━━━━━━━━━━━━━━\n`;
+  let text = `🎓 <b>DATABASE EXPORT: ${escapeHtml(headerTitle)}</b> (<code>${res.rows.length}</code> Total)\n━━━━━━━━━━━━━━━━━━━━\n`;
   let currentGroupDept = "";
 
   for (let idx = 0; idx < res.rows.length; idx++) {
@@ -1027,7 +1036,7 @@ bot.callbackQuery(/^roster_(.+)$/, async (ctx) => {
     const rawUname = r.username ? `@${r.username}` : `[No @username]`;
     const uname = escapeHtml(rawUname);
     const dateStr = new Date(r.updated_at).toLocaleDateString();
-    const staff = r.processed_by ? ` (Staff: ${escapeHtml(r.processed_by)})` : '';
+    const staff = r.processed_by ? ` (By: ${escapeHtml(r.processed_by)})` : '';
 
     let itemText = "";
     if (isAll && r.department !== currentGroupDept) {
@@ -1035,7 +1044,7 @@ bot.callbackQuery(/^roster_(.+)$/, async (ctx) => {
       itemText += `\n📁 <b>${escapeHtml(currentGroupDept)}</b>\n`;
     }
 
-    itemText += `${idx + 1}. <b>${uname}</b> (ID: <code>${r.user_id}</code>)\n   • Approved: ${dateStr}${staff}\n`;
+    itemText += `<code>[${idx + 1}]</code> <b>${uname}</b> (UID: <code>${r.user_id}</code>)\n   ↳ Approved: ${dateStr}${staff}\n`;
 
     if ((text + itemText).length > 3800) {
       await ctx.reply(text, { parse_mode: 'HTML' });
@@ -1054,35 +1063,35 @@ bot.callbackQuery(/^notify_mod_(\d+)$/, async (ctx) => {
 
   const moduleId = Number(ctx.match[1]);
   const modRes = await pool.query('SELECT title, department FROM department_modules WHERE id = $1', [moduleId]);
-  if (modRes.rows.length === 0) return ctx.editMessageText("⚠️ Module no longer exists.");
+  if (modRes.rows.length === 0) return ctx.editMessageText("⚠️ <b>ERROR:</b> Target document missing from Vault.", { parse_mode: 'HTML' });
 
   const { title, department } = modRes.rows[0];
   const cleanDept = department.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
 
   const studentsRes = await pool.query("SELECT DISTINCT user_id FROM tickets WHERE status = 'APPROVED' AND department ILIKE $1", [`%${cleanDept}%`]);
   const students = studentsRes.rows;
-  if (students.length === 0) return ctx.editMessageText(`ℹ️ No approved students enrolled in <b>${escapeHtml(cleanDept)}</b> to notify.`, { parse_mode: 'HTML' });
+  if (students.length === 0) return ctx.editMessageText(`ℹ️ <b>NOTICE:</b> No approved profiles in <b>${escapeHtml(cleanDept)}</b> to target.`, { parse_mode: 'HTML' });
 
   let sentCount = 0;
   for (const s of students) {
     try {
       const sLang = await getUserLang(s.user_id);
       const notifText = sLang === 'am'
-        ? `📚 <b>አዲስ የትምህርት ሞጁል ተጭኗል!</b>\n━━━━━━━━━━━━━━━━━━━━\n• <b>ክፍል:</b> ${escapeHtml(cleanDept)}\n• <b>ሞጁል:</b> ${escapeHtml(title)}\n\n<i>ከታች ያለውን ቁልፍ በመጫን ማውረድ ይችላሉ፡</i>`
-        : `📚 <b>NEW COURSE MODULE AVAILABLE</b>\n━━━━━━━━━━━━━━━━━━━━\n• <b>Department:</b> ${escapeHtml(cleanDept)}\n• <b>Module:</b> ${escapeHtml(title)}\n\n<i>Tap below to download:</i>`;
+        ? `📚 <b>አዲስ የትምህርት ሞጁል ተጭኗል!</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>ክፍል:</b> ${escapeHtml(cleanDept)}\n• <b>ሞጁል:</b> ${escapeHtml(title)}</blockquote>\n\n<i>ከታች ያለውን ቁልፍ በመጫን ፋይሉን ያውርዱ፡</i>`
+        : `📚 <b>VAULT UPDATE: NEW MODULE SECURED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Department:</b> ${escapeHtml(cleanDept)}\n• <b>File Title:</b> ${escapeHtml(title)}</blockquote>\n\n<i>Authorized users may initiate download below:</i>`;
 
-      const dlKb = new InlineKeyboard().text(sLang === 'am' ? "⬇️ አውርድ (Download)" : "⬇️ Download Module", `dlmod_${moduleId}`);
+      const dlKb = new InlineKeyboard().text(sLang === 'am' ? "⬇️ ሞጁሉን አውርድ" : "⬇️ INITIATE DOWNLOAD", `dlmod_${moduleId}`);
       await bot.api.sendMessage(s.user_id, notifText, { parse_mode: 'HTML', reply_markup: dlKb });
       sentCount++;
     } catch (e) {}
   }
 
-  await ctx.editMessageText(`📢 <b>Broadcast Complete!</b>\n━━━━━━━━━━━━━━━━━━━━\n• <b>Module:</b> ${escapeHtml(title)}\n• <b>Department:</b> ${escapeHtml(cleanDept)}\n• <b>Delivered to:</b> ${sentCount}/${students.length} students.`, { parse_mode: 'HTML' });
+  await ctx.editMessageText(`📢 <b>SYSTEM BROADCAST SUCCESSFUL</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Target File:</b> ${escapeHtml(title)}\n• <b>Vector:</b> ${escapeHtml(cleanDept)}\n• <b>Delivered to:</b> <code>${sentCount}/${students.length}</code> nodes.</blockquote>`, { parse_mode: 'HTML' });
 });
 
 bot.callbackQuery('dismiss_mod_notify', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  await ctx.editMessageText("🔕 Notification skipped. Module uploaded silently.");
+  await ctx.editMessageText("🔕 <b>STEALTH MODE:</b> Document ingested silently. Broadcast skipped.", { parse_mode: 'HTML' });
 });
 
 bot.callbackQuery('cmd_mod_analytics', async (ctx) => {
@@ -1096,9 +1105,9 @@ bot.callbackQuery('cmd_mod_analytics', async (ctx) => {
     GROUP BY m.id, m.title, m.department ORDER BY m.department ASC, total_downloads DESC
   `);
 
-  if (res.rows.length === 0) return ctx.reply("📊 <b>Module Analytics:</b> No modules uploaded yet.", { message_thread_id: topicId, parse_mode: 'HTML' });
+  if (res.rows.length === 0) return ctx.reply("📊 <b>VAULT ANALYTICS:</b> Storage array empty.", { message_thread_id: topicId, parse_mode: 'HTML' });
 
-  let text = "📈 <b>COURSE MODULE ENGAGEMENT ANALYTICS</b>\n\n";
+  let text = "📈 <b>VAULT ENGAGEMENT TELEMETRY</b>\n━━━━━━━━━━━━━━━━━━━━\n";
   let currentDept = "";
 
   for (const row of res.rows) {
@@ -1111,7 +1120,7 @@ bot.callbackQuery('cmd_mod_analytics', async (ctx) => {
     const totalEnrolled = Number(enrolledRes.rows[0].count) || 0;
     const downloads = Number(row.total_downloads);
     const percentage = totalEnrolled > 0 ? Math.round((downloads / totalEnrolled) * 100) : 0;
-    text += `• <b>${escapeHtml(row.title)}</b>\n  ↳ Downloaded by: <b>${downloads}/${totalEnrolled} students</b> (${percentage}%)\n`;
+    text += `• <b>${escapeHtml(row.title)}</b>\n  ↳ Penetration: <b><code>${downloads}/${totalEnrolled}</code> profiles</b> (<code>${percentage}%</code>)\n`;
   }
   await ctx.reply(text, { message_thread_id: topicId, parse_mode: 'HTML' });
 });
@@ -1125,7 +1134,7 @@ bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
 
 bot.callbackQuery('cmd_lookfor', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  await ctx.reply("🔍 <b>Search Student Record</b>\n\n<i>Reply directly to this message with a <b>User ID</b>, <b>@username</b>, or <b>Department</b>.</i>", {
+  await ctx.reply("🔍 <b>DATABASE RECORD QUERY</b>\n━━━━━━━━━━━━━━━━━━━━\n\n<i>Reply directly to this system message with a target <b>UID</b>, <b>@username</b>, or <b>Department Name</b>.</i>", {
     message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML', reply_markup: { force_reply: true }
   });
 });
@@ -1138,12 +1147,12 @@ bot.callbackQuery('cmd_stats', async (ctx) => {
 
 bot.callbackQuery('cmd_export', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  await sendCSVExport(await getActiveStaffGroupId(), ctx.callbackQuery.message.message_thread_id, "📄 <b>Receipt Audit Export</b>");
+  await sendCSVExport(await getActiveStaffGroupId(), ctx.callbackQuery.message.message_thread_id, "📄 <b>DATABASE BACKUP EXPORT GENERATED</b>");
 });
 
 bot.callbackQuery('cmd_broadcast', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  await ctx.reply("📢 <b>Send Student Announcement</b>\n\n<i>Reply directly to this message with the exact announcement text to broadcast.</i>", {
+  await ctx.reply("📢 <b>INITIALIZE SYSTEM BROADCAST</b>\n━━━━━━━━━━━━━━━━━━━━\n\n<i>Reply directly to this system message with the exact announcement payload to transmit.</i>", {
     message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML', reply_markup: { force_reply: true }
   });
 });
@@ -1151,7 +1160,7 @@ bot.callbackQuery('cmd_broadcast', async (ctx) => {
 bot.callbackQuery('cmd_upload_module', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   if (!(await isStaff(ctx))) return;
-  await ctx.reply("📚 <b>Upload Course Module</b>\n\n<i>Select academic department:</i>", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML', reply_markup: getModuleDepartmentKeyboard() });
+  await ctx.reply("📂 <b>VAULT INGESTION PROTOCOL</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>Select target departmental array:</i>", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML', reply_markup: getModuleDepartmentKeyboard() });
 });
 
 bot.callbackQuery(/^moddept_(.+)$/, async (ctx) => {
@@ -1159,10 +1168,10 @@ bot.callbackQuery(/^moddept_(.+)$/, async (ctx) => {
   const dept = ctx.match[1];
   if (dept === 'cancel') {
     await clearStaffPendingModuleDept(ctx.from.id);
-    return ctx.editMessageText("❌ Module upload cancelled.");
+    return ctx.editMessageText("❌ <b>OPERATION ABORTED:</b> Ingestion cancelled.", { parse_mode: 'HTML' });
   }
   await setStaffPendingModuleDept(ctx.from.id, dept);
-  await ctx.editMessageText(`✅ Selected Department: <b>${escapeHtml(dept)}</b>\n\n<i>Now, simply send or forward the PDF document for this module.</i>`, { parse_mode: 'HTML' });
+  await ctx.editMessageText(`✅ <b>TARGET LOCKED:</b> <code>${escapeHtml(dept)}</code>\n━━━━━━━━━━━━━━━━━━━━\n\n<i>System ready. Transmit or forward the PDF document to ingest.</i>`, { parse_mode: 'HTML' });
 });
 
 bot.callbackQuery('cmd_submit', async (ctx) => {
@@ -1176,7 +1185,7 @@ bot.callbackQuery('cmd_pending_info', async (ctx) => {
   const lang = await getUserLang(ctx.from.id);
   const msg = lang === 'am'
     ? "⏳ <b>ማመልከቻዎ በግምገማ ላይ ነው</b>\n\nየላኩት ደረሰኝ በመታየት ላይ ስለሆነ በአሁኑ ወቅት አዲስ ደረሰኝ መላክ አይችሉም።"
-    : "⏳ <b>Submission Under Review</b>\n\nYour receipt is currently being verified by staff. Submissions are disabled until review completes.";
+    : "⏳ <b>SYSTEM LOCKOUT: PENDING REVIEW</b>\n\n<blockquote>Your submission is currently under active analysis by the Finance node. Duplicate submissions are disabled.</blockquote>";
   await ctx.reply(msg, { parse_mode: 'HTML', reply_markup: getStudentKeyboard(lang, 'PENDING') });
 });
 
@@ -1185,16 +1194,16 @@ bot.callbackQuery('cmd_download_pdf', async (ctx) => {
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
   const res = await pool.query("SELECT department, username, processed_by FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1", [userId]);
-  if (res.rows.length === 0) return ctx.reply("⚠️ No approved receipt found.");
+  if (res.rows.length === 0) return ctx.reply("⚠️ <b>ERROR:</b> Clearance missing or revoked.", { parse_mode: 'HTML' });
 
   const { department, username, processed_by } = res.rows[0];
   const botUsername = ctx.me?.username;
   try {
     const pdfPath = await generateApprovalPDF(userId, username || 'N/A', department, processed_by || 'Finance Team', botUsername, lang);
-    await ctx.replyWithDocument(new InputFile(pdfPath, `Tuition_Approval_Slip_${userId}.pdf`), { caption: STRINGS[lang].approvedMsg, parse_mode: 'HTML' });
+    await ctx.replyWithDocument(new InputFile(pdfPath, `Official_Clearance_${userId}.pdf`), { caption: STRINGS[lang].approvedMsg, parse_mode: 'HTML' });
     if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
   } catch (err) {
-    ctx.reply("❌ Unable to generate PDF slip.");
+    ctx.reply("❌ <b>SYSTEM ERROR:</b> PDF Generation Engine failed.", { parse_mode: 'HTML' });
   }
 });
 
@@ -1207,33 +1216,33 @@ bot.callbackQuery('cmd_modules', async (ctx) => {
   if (checkApproval.rows.length === 0) {
     const notApprovedMsg = lang === 'am'
       ? "🔒 <b>የሞጁል ማውረጃ ተቆልፏል</b>\n\nሞጁሎችን ለማውረድ የክፍያ ደረሰኝዎ መጽደቅ አለበት።"
-      : "🔒 <b>Modules Locked</b>\n\nCourse modules are only accessible to students with an <b>APPROVED</b> tuition payment.";
+      : "🔒 <b>VAULT ACCESS DENIED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>Storage arrays are encrypted and strictly isolated. <b>APPROVED</b> status is required to bypass firewalls.</blockquote>";
     return ctx.reply(notApprovedMsg, { parse_mode: 'HTML', reply_markup: getStudentKeyboard(lang, null) });
   }
 
   const studentDept = checkApproval.rows[0].department.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
   const modulesRes = await pool.query("SELECT id, title FROM department_modules WHERE department ILIKE $1 ORDER BY id ASC", [`%${studentDept}%`]);
-  if (modulesRes.rows.length === 0) return ctx.reply(`📚 No modules uploaded for <b>${escapeHtml(studentDept)}</b> yet.`, { parse_mode: 'HTML' });
+  if (modulesRes.rows.length === 0) return ctx.reply(`📚 <b>VAULT EMPTY:</b> No documents available for <code>${escapeHtml(studentDept)}</code>.`, { parse_mode: 'HTML' });
 
   const kb = new InlineKeyboard();
   modulesRes.rows.forEach((m) => kb.text(`📄 ${m.title}`, `dlmod_${m.id}`).row());
-  await ctx.reply(`📚 <b>Course Modules (${escapeHtml(studentDept)})</b>\n\n<i>Select a module below to download:</i>`, { parse_mode: 'HTML', reply_markup: kb });
+  await ctx.reply(`📚 <b>SECURE VAULT: <code>${escapeHtml(studentDept)}</code></b>\n━━━━━━━━━━━━━━━━━━━━\n<i>Select document to execute download:</i>`, { parse_mode: 'HTML', reply_markup: kb });
 });
 
 bot.callbackQuery(/^dlmod_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const moduleId = Number(ctx.match[1]);
   const res = await pool.query("SELECT title, file_id FROM department_modules WHERE id = $1", [moduleId]);
-  if (res.rows.length === 0) return ctx.reply("⚠️ Module not found or removed.");
+  if (res.rows.length === 0) return ctx.reply("⚠️ <b>ERROR 404:</b> Document purged or corrupted.", { parse_mode: 'HTML' });
 
   try {
     await pool.query("INSERT INTO module_downloads (module_id, user_id) VALUES ($1, $2) ON CONFLICT (module_id, user_id) DO NOTHING", [moduleId, ctx.from.id]);
   } catch (e) {}
 
   try {
-    await ctx.replyWithDocument(res.rows[0].file_id, { caption: `📖 <b>${escapeHtml(res.rows[0].title)}</b>\n\n<i>Renaissance Global Official Course Module</i>`, parse_mode: 'HTML' });
+    await ctx.replyWithDocument(res.rows[0].file_id, { caption: `📖 <b>${escapeHtml(res.rows[0].title)}</b>\n<blockquote><i>Classified: Renaissance Global Course Module</i></blockquote>`, parse_mode: 'HTML' });
   } catch (err) {
-    ctx.reply("❌ Unable to download module.");
+    ctx.reply("❌ <b>TRANSMISSION ERROR:</b> Payload failed.", { parse_mode: 'HTML' });
   }
 });
 
@@ -1248,26 +1257,26 @@ bot.callbackQuery('cmd_status', async (ctx) => {
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
   const res = await pool.query('SELECT department, status, rejection_reason FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1', [userId]);
-  if (res.rows.length === 0) return ctx.reply(lang === 'am' ? "ℹ️ ምንም ደረሰኝ አላስገቡም።" : "ℹ️ No payment receipts submitted yet.", { reply_markup: getStudentKeyboard(lang, null) });
+  if (res.rows.length === 0) return ctx.reply(lang === 'am' ? "ℹ️ ምንም ማመልከቻ የለም።" : "ℹ️ <b>SYSTEM ALERT:</b> No active traces in database.", { parse_mode: 'HTML', reply_markup: getStudentKeyboard(lang, null) });
 
   const ticket = res.rows[0];
   let timeline = "";
   if (ticket.status === 'PENDING') {
     timeline = lang === 'am' 
-      ? "🟢 <b>1. ደረሰኝ መላክ</b> — ተጠናቋል\n🟡 <b>2. የሰራተኞች ግምገማ</b> — በሂደት ላይ...\n⚪️ <b>3. ማጽደቅ / ፒዲኤፍ</b> — ተቆልፏል" 
-      : "🟢 <b>Step 1: Submission</b> — Complete\n🟡 <b>Step 2: Verification</b> — In Progress...\n⚪️ <b>Step 3: PDF Slip</b> — Locked";
+      ? "<code>[1]</code> <b>ማመልከቻ መላክ:</b> ተጠናቋል\n<code>[2]</code> <b>የቢሮ ግምገማ:</b> ⏳ በመታየት ላይ\n<code>[3]</code> <b>ማጽደቅ:</b> 🔒 ተቆልፏል" 
+      : "<code>[1]</code> <b>DATA INGEST:</b> Verified\n<code>[2]</code> <b>STAFF AUDIT:</b> ⏳ In Progress\n<code>[3]</code> <b>CLEARANCE:</b> 🔒 Locked";
   } else if (ticket.status === 'APPROVED') {
     timeline = lang === 'am' 
-      ? "🟢 <b>1. ደረሰኝ መላክ</b> — ተጠናቋል\n🟢 <b>2. የሰራተኞች ግምገማ</b> — ተጠናቋል\n🟢 <b>3. ጸድቋል / ፒዲኤፍ</b> — ክፍት ነው" 
-      : "🟢 <b>Step 1: Submission</b> — Complete\n🟢 <b>Step 2: Verification</b> — Complete\n🟢 <b>Step 3: Approved & Cleared</b> — Unlocked";
+      ? "<code>[1]</code> <b>ማመልከቻ መላክ:</b> ተጠናቋል\n<code>[2]</code> <b>የቢሮ ግምገማ:</b> ተጠናቋል\n<code>[3]</code> <b>ማጽደቅ:</b> ✅ ጸድቋል" 
+      : "<code>[1]</code> <b>DATA INGEST:</b> Verified\n<code>[2]</code> <b>STAFF AUDIT:</b> Verified\n<code>[3]</code> <b>CLEARANCE:</b> ✅ ACTIVE";
   } else {
     timeline = lang === 'am' 
-      ? "🟢 <b>1. ደረሰኝ መላክ</b> — ተጠናቋል\n🔴 <b>2. ውድቅ ተደርጓል</b> — ማስተካከያ ይፈልጋል" 
-      : "🟢 <b>Step 1: Submission</b> — Complete\n🔴 <b>Step 2: Rejected</b> — Action Required";
+      ? "<code>[1]</code> <b>ማመልከቻ መላክ:</b> ተጠናቋል\n<code>[2]</code> <b>የቢሮ ግምገማ:</b> ❌ ውድቅ ሆኗል" 
+      : "<code>[1]</code> <b>DATA INGEST:</b> Verified\n<code>[2]</code> <b>STAFF AUDIT:</b> ❌ DENIED";
   }
 
-  let msg = `📊 <b>YOUR CLEARANCE STATUS</b>\n━━━━━━━━━━━━━━━━━━━━\n• <b>Department:</b> ${escapeHtml(ticket.department)}\n• <b>Status:</b> <b>${ticket.status}</b>\n\n${timeline}\n`;
-  if (ticket.status === 'REJECTED' && ticket.rejection_reason) msg += `\n<blockquote><b>Reason:</b> ${escapeHtml(ticket.rejection_reason)}</blockquote>`;
+  let msg = `📊 <b>LIVE PROFILE TELEMETRY</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Department:</b> ${escapeHtml(ticket.department)}\n• <b>System Status:</b> <b>${ticket.status}</b></blockquote>\n${timeline}\n`;
+  if (ticket.status === 'REJECTED' && ticket.rejection_reason) msg += `\n<blockquote><b>ROOT CAUSE:</b> ${escapeHtml(ticket.rejection_reason)}</blockquote>`;
   await ctx.reply(msg, { parse_mode: 'HTML', reply_markup: getStudentKeyboard(lang, ticket.status) });
 });
 
@@ -1276,14 +1285,14 @@ bot.callbackQuery('cmd_history', async (ctx) => {
   const userId = ctx.from.id;
   const lang = await getUserLang(userId);
   const res = await pool.query('SELECT department, status, rejection_reason, created_at FROM tickets WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20', [userId]);
-  if (res.rows.length === 0) return ctx.reply("ℹ️ No submission history.", { reply_markup: getStudentKeyboard(lang, null) });
+  if (res.rows.length === 0) return ctx.reply("ℹ️ <b>SYSTEM ALERT:</b> Log history empty.", { parse_mode: 'HTML', reply_markup: getStudentKeyboard(lang, null) });
 
-  let text = "📜 <b>Payment History:</b>\n━━━━━━━━━━━━━━━━━━━━\n";
+  let text = "📜 <b>PROFILE AUDIT LOGS:</b>\n━━━━━━━━━━━━━━━━━━━━\n";
   for (let idx = 0; idx < res.rows.length; idx++) {
     const r = res.rows[idx];
     const icon = r.status === 'APPROVED' ? "✅" : (r.status === 'REJECTED' ? "❌" : "⏳");
-    let itemText = `${idx + 1}. ${icon} <b>${escapeHtml(r.department)}</b>\n   • Status: ${r.status}\n   • Date: ${new Date(r.created_at).toLocaleDateString()}\n`;
-    if (r.status === 'REJECTED' && r.rejection_reason) itemText += `   <blockquote>Reason: ${escapeHtml(r.rejection_reason)}</blockquote>\n`;
+    let itemText = `<code>[${idx + 1}]</code> ${icon} <b>${escapeHtml(r.department)}</b>\n<blockquote>• <b>Status:</b> ${r.status}\n• <b>Timestamp:</b> ${new Date(r.created_at).toLocaleDateString()}</blockquote>\n`;
+    if (r.status === 'REJECTED' && r.rejection_reason) itemText += `⚠️ <i>Cause: ${escapeHtml(r.rejection_reason)}</i>\n`;
     itemText += `\n`;
     if ((text + itemText).length > 3800) {
       await ctx.reply(text, { parse_mode: 'HTML' });
@@ -1318,20 +1327,20 @@ bot.callbackQuery(/^dept(reg|full)_(.+)$/, async (ctx) => {
 bot.command(['module', 'uploadmodule'], async (ctx) => {
   if (!(await isStaff(ctx))) return;
   const staffGroupId = await getActiveStaffGroupId();
-  if (!staffGroupId) return ctx.reply("⚠️ Run /bind in staff group first.");
+  if (!staffGroupId) return ctx.reply("⚠️ <b>DENIED:</b> Execute /bind protocol first.", { parse_mode: 'HTML' });
 
   const doc = ctx.message.document || ctx.message.reply_to_message?.document;
-  if (!doc) return ctx.reply("⚠️ Format: Attach or reply to PDF with <code>/module Department | Title</code>", { parse_mode: 'HTML' });
+  if (!doc) return ctx.reply("⚠️ <b>SYNTAX ERROR:</b> Attach PDF via <code>/module Department | Title</code>", { parse_mode: 'HTML' });
 
   const parts = (ctx.message.caption || ctx.message.text || '').replace(/^\/(module|uploadmodule)/, '').trim().split('|').map(s => s.trim());
-  if (parts.length < 2 || !parts[0] || !parts[1]) return ctx.reply("⚠️ Provide both <code>&lt;Dept&gt; | &lt;Title&gt;</code>", { parse_mode: 'HTML' });
+  if (parts.length < 2 || !parts[0] || !parts[1]) return ctx.reply("⚠️ <b>SYNTAX ERROR:</b> Strict parsing requires <code>&lt;Dept&gt; | &lt;Title&gt;</code>", { parse_mode: 'HTML' });
 
   const [dept, title] = parts;
   try {
     const vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
     const vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, {
       message_thread_id: vaultTopicId,
-      caption: `📚 <b>COURSE MODULE ARCHIVE</b>\n• Department: ${escapeHtml(dept)}\n• Title: ${escapeHtml(title)}`,
+      caption: `📚 <b>VAULT ARCHIVE INDEX</b>\n<blockquote>• <b>Department:</b> ${escapeHtml(dept)}\n• <b>File Title:</b> ${escapeHtml(title)}</blockquote>`,
       parse_mode: 'HTML'
     });
 
@@ -1345,24 +1354,24 @@ bot.command(['module', 'uploadmodule'], async (ctx) => {
       } catch (e) {}
     }
 
-    const notifyKb = new InlineKeyboard().text("📢 Notify Enrolled Students", `notify_mod_${newModId}`).row().text("🔕 Silent Upload", "dismiss_mod_notify");
-    await ctx.reply(`✅ <b>Module Stashed in Vault!</b>\n• Department: ${escapeHtml(dept)}\n• Title: ${escapeHtml(title)}\n\nBroadcast to enrolled students?`, { parse_mode: 'HTML', reply_markup: notifyKb });
+    const notifyKb = new InlineKeyboard().text("📢 BROADCAST TO NETWORK", `notify_mod_${newModId}`).row().text("🔕 STEALTH INGEST", "dismiss_mod_notify");
+    await ctx.reply(`✅ <b>DOCUMENT STASHED IN VAULT</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Sector:</b> ${escapeHtml(dept)}\n• <b>Designation:</b> ${escapeHtml(title)}</blockquote>\n\n<i>Initiate network broadcast sequence?</i>`, { parse_mode: 'HTML', reply_markup: notifyKb });
   } catch (err) {
-    ctx.reply(`❌ Failed: ${err.message}`);
+    ctx.reply(`❌ <b>CRITICAL ERROR:</b> ${err.message}`, { parse_mode: 'HTML' });
   }
 });
 
 bot.callbackQuery(/^trans_(\d+)_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  await ctx.editMessageText("📂 <b>Select new department:</b>", { parse_mode: 'HTML', reply_markup: getTransferKeyboard(Number(ctx.match[1]), Number(ctx.match[2])) });
+  await ctx.editMessageText("📂 <b>SELECT OVERRIDE PARAMETER:</b>", { parse_mode: 'HTML', reply_markup: getTransferKeyboard(Number(ctx.match[1]), Number(ctx.match[2])) });
 });
 
 bot.callbackQuery(/^canceltrans_(\d+)_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const res = await pool.query('SELECT username, department FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' LIMIT 1', [Number(ctx.match[1]), Number(ctx.match[2])]);
-  if (res.rows.length === 0) return ctx.editMessageText("⚠️ Ticket status changed.");
-  const kb = new InlineKeyboard().text("✅ Approve", `app_${ctx.match[1]}_${ctx.match[2]}`).row().text("❌ Reject", `rej_${ctx.match[1]}_${ctx.match[2]}`).row().text("🔄 Transfer Dept", `trans_${ctx.match[1]}_${ctx.match[2]}`);
-  await ctx.editMessageText(`🧾 <b>NEW TUITION PAYMENT</b>\n━━━━━━━━━━━━━━━━━━━━\n👤 <b>Student:</b> @${escapeHtml(res.rows[0].username || 'Unknown')}\n🆔 <b>ID:</b> <code>${ctx.match[1]}</code>\n🏫 <b>Program:</b> ${escapeHtml(res.rows[0].department)}\n━━━━━━━━━━━━━━━━━━━━\n⚡️ <i>Please review the attached document below.</i>`, { parse_mode: 'HTML', reply_markup: kb });
+  if (res.rows.length === 0) return ctx.editMessageText("⚠️ <b>ERROR:</b> Database status mismatch.", { parse_mode: 'HTML' });
+  const kb = new InlineKeyboard().text("✅ APPROVE", `app_${ctx.match[1]}_${ctx.match[2]}`).row().text("❌ REJECT", `rej_${ctx.match[1]}_${ctx.match[2]}`).row().text("🔄 OVERRIDE DEPT", `trans_${ctx.match[1]}_${ctx.match[2]}`);
+  await ctx.editMessageText(`🧾 <b>NEW DATA UPLOAD DETECTED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>👤 <b>Profile:</b> @${escapeHtml(res.rows[0].username || 'Unknown')}\n🆔 <b>UID:</b> <code>${ctx.match[1]}</code>\n🏫 <b>Target:</b> ${escapeHtml(res.rows[0].department)}</blockquote>\n━━━━━━━━━━━━━━━━━━━━\n⚡️ <i>Analyze the appended media artifact below.</i>`, { parse_mode: 'HTML', reply_markup: kb });
 });
 
 bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
@@ -1373,7 +1382,7 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   if (!staffGroupId) return;
 
   const ticketRes = await pool.query('SELECT topic_id, message_id, ticket_msg_id, username, department FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' ORDER BY updated_at DESC LIMIT 1', [targetUserId, originTopicId]);
-  if (ticketRes.rows.length === 0) return ctx.editMessageText("⚠️ Already transferred or processed.");
+  if (ticketRes.rows.length === 0) return ctx.editMessageText("⚠️ <b>ERROR:</b> Artifact processed or vanished.", { parse_mode: 'HTML' });
 
   const deptMap = { mkt: "Marketing Management", biz: "Business Management", agri: "Agribusiness and Value chain management", ed: "Educational planning and management", acc: "Accounting and finance", log: "Logistics and Supply chain management" };
   const planSuffix = ticketRes.rows[0].department.includes("(4-Year Complete)") ? "(4-Year Complete)" : "(Regular / Term)";
@@ -1381,8 +1390,8 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged, staffGroupId);
 
   const newForwardRes = await ctx.api.copyMessage(staffGroupId, staffGroupId, Number(ticketRes.rows[0].message_id), { message_thread_id: newTopicId });
-  const kb = new InlineKeyboard().text("✅ Approve", `app_${targetUserId}_${newTopicId}`).row().text("❌ Reject", `rej_${targetUserId}_${newTopicId}`).row().text("🔄 Transfer Dept", `trans_${targetUserId}_${newTopicId}`);
-  const newTicketMsg = await ctx.api.sendMessage(staffGroupId, `🧾 <b>NEW TUITION PAYMENT</b>\n━━━━━━━━━━━━━━━━━━━━\n👤 <b>Student:</b> @${escapeHtml(ticketRes.rows[0].username)}\n🆔 <b>ID:</b> <code>${targetUserId}</code>\n🏫 <b>Program:</b> ${escapeHtml(newDeptTagged)}\n━━━━━━━━━━━━━━━━━━━━\n⚡️ <i>Please review the attached document below.</i>`, { message_thread_id: newTopicId, parse_mode: 'HTML', reply_markup: kb });
+  const kb = new InlineKeyboard().text("✅ APPROVE", `app_${targetUserId}_${newTopicId}`).row().text("❌ REJECT", `rej_${targetUserId}_${newTopicId}`).row().text("🔄 OVERRIDE DEPT", `trans_${targetUserId}_${newTopicId}`);
+  const newTicketMsg = await ctx.api.sendMessage(staffGroupId, `🧾 <b>NEW DATA UPLOAD DETECTED (TRANSFERRED)</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>👤 <b>Profile:</b> @${escapeHtml(ticketRes.rows[0].username)}\n🆔 <b>UID:</b> <code>${targetUserId}</code>\n🏫 <b>Target:</b> ${escapeHtml(newDeptTagged)}</blockquote>\n━━━━━━━━━━━━━━━━━━━━\n⚡️ <i>Analyze the appended media artifact below.</i>`, { message_thread_id: newTopicId, parse_mode: 'HTML', reply_markup: kb });
 
   await pool.query(`UPDATE tickets SET department = $1, topic_id = $2, message_id = $3, ticket_msg_id = $4, updated_at = CURRENT_TIMESTAMP WHERE user_id = $5 AND status = 'PENDING'`, [newDeptTagged, newTopicId, newForwardRes.message_id, newTicketMsg.message_id, targetUserId]);
   try { await ctx.api.deleteMessage(staffGroupId, Number(ticketRes.rows[0].message_id)); } catch (e) {}
@@ -1405,7 +1414,7 @@ bot.on('message', async (ctx) => {
 
   let staffDept = await getStaffPendingModuleDept(ctx.from.id);
   if (!staffDept && ctx.message.reply_to_message?.text) {
-    const match = ctx.message.reply_to_message.text.match(/Selected Department:\s*([^\n]+)/);
+    const match = ctx.message.reply_to_message.text.match(/TARGET LOCKED:\s*([^\n]+)/);
     if (match) staffDept = match[1].trim();
   }
 
@@ -1417,7 +1426,7 @@ bot.on('message', async (ctx) => {
       const vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
       const vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, {
         message_thread_id: vaultTopicId,
-        caption: `📚 <b>COURSE MODULE ARCHIVE</b>\n• Department: ${escapeHtml(staffDept)}\n• Title: ${escapeHtml(moduleTitle)}`,
+        caption: `📚 <b>VAULT ARCHIVE INDEX</b>\n<blockquote>• <b>Department:</b> ${escapeHtml(staffDept)}\n• <b>File Title:</b> ${escapeHtml(moduleTitle)}</blockquote>`,
         parse_mode: 'HTML'
       });
       const insRes = await pool.query("INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4) RETURNING id", [staffDept, moduleTitle, vaultMsg.document.file_id, doc.file_name || `${moduleTitle}.pdf`]);
@@ -1426,8 +1435,8 @@ bot.on('message', async (ctx) => {
 
       // Exit silently for grouped media to avoid the 429 rate limit crash on webhook
       if (!ctx.message.media_group_id) {
-        const notifyKb = new InlineKeyboard().text("📢 Notify Enrolled", `notify_mod_${insRes.rows[0].id}`).row().text("✅ Finish Upload Session", "moddept_cancel");
-        return ctx.reply(`✅ <b>Module Stashed in Vault!</b>\n<i>Collective Upload Active: Send another file to keep uploading.</i>`, { message_thread_id: topicId, parse_mode: 'HTML', reply_markup: notifyKb });
+        const notifyKb = new InlineKeyboard().text("📢 BROADCAST TO NETWORK", `notify_mod_${insRes.rows[0].id}`).row().text("✅ TERMINATE UPLOAD LINK", "moddept_cancel");
+        return ctx.reply(`✅ <b>DOCUMENT SECURED</b>\n<i>Link established: Stream another payload to append to array.</i>`, { message_thread_id: topicId, parse_mode: 'HTML', reply_markup: notifyKb });
       }
     } catch (err) {
       console.error("Upload error:", err.message);
@@ -1437,10 +1446,10 @@ bot.on('message', async (ctx) => {
 
   if (isStaffGroup && ctx.message.reply_to_message) {
     const orig = ctx.message.reply_to_message.text || '';
-    if (orig.includes("Search Student Record")) return performSearch(ctx, ctx.message.text.trim(), topicId);
-    if (orig.includes("Send Announcement")) return performBroadcast(ctx, topicId, ctx.message.text.trim());
-    if (orig.includes("Change Student Placement")) return executeChangeDeptPrompt(ctx, Number(ctx.message.text.trim()), topicId);
-    if (orig.includes("Revoke Student Approval")) return executeRevoke(ctx, Number(ctx.message.text.trim()), topicId);
+    if (orig.includes("DATABASE RECORD QUERY")) return performSearch(ctx, ctx.message.text.trim(), topicId);
+    if (orig.includes("INITIALIZE SYSTEM BROADCAST")) return performBroadcast(ctx, topicId, ctx.message.text.trim());
+    if (orig.includes("INITIATE DEPARTMENT OVERRIDE")) return executeChangeDeptPrompt(ctx, Number(ctx.message.text.trim()), topicId);
+    if (orig.includes("INITIATE STATUS REVOCATION")) return executeRevoke(ctx, Number(ctx.message.text.trim()), topicId);
   }
 
   if (isPrivate) {
@@ -1450,26 +1459,26 @@ bot.on('message', async (ctx) => {
     if (activeCheck.rows.length > 0) return ctx.reply(STRINGS[lang].pendingExists, { reply_markup: getStudentKeyboard(lang, 'PENDING') });
 
     const chosenDeptTagged = await getPendingDepartment(userId);
-    if (!chosenDeptTagged) return ctx.reply(lang === 'am' ? "⚠️ እባክዎን መጀመሪያ ክፍል ይምረጡ።" : "⚠️ Please select your department first!", { reply_markup: getStudentKeyboard(lang, null) });
+    if (!chosenDeptTagged) return ctx.reply(lang === 'am' ? "⚠️ <b>ስህተት:</b> እባክዎን መጀመሪያ ክፍል ይምረጡ።" : "⚠️ <b>ERROR:</b> Missing assignment protocol! Select department first.", { parse_mode: 'HTML', reply_markup: getStudentKeyboard(lang, null) });
 
     const fileId = ctx.message.photo ? ctx.message.photo[ctx.message.photo.length - 1].file_id : (ctx.message.document ? ctx.message.document.file_id : null);
     if (!fileId) return ctx.reply(STRINGS[lang].noFileErr, { parse_mode: 'HTML' });
-    if (!staffGroupId) return ctx.reply("⚠️ Staff group not registered.");
+    if (!staffGroupId) return ctx.reply("⚠️ <b>SYSTEM HALT:</b> Telemetry link disconnected.");
 
     const username = ctx.from.username || ctx.from.first_name || 'Unknown';
     try {
       const dbTopicId = await getOrCreateDepartmentTopic(ctx, chosenDeptTagged, staffGroupId);
       const forwardRes = await ctx.api.copyMessage(staffGroupId, ctx.chat.id, ctx.message.message_id, { message_thread_id: dbTopicId });
-      const kb = new InlineKeyboard().text("✅ Approve", `app_${userId}_${dbTopicId}`).row().text("❌ Reject", `rej_${userId}_${dbTopicId}`).row().text("🔄 Transfer Dept", `trans_${userId}_${dbTopicId}`);
+      const kb = new InlineKeyboard().text("✅ APPROVE", `app_${userId}_${dbTopicId}`).row().text("❌ REJECT", `rej_${userId}_${dbTopicId}`).row().text("🔄 OVERRIDE DEPT", `trans_${userId}_${dbTopicId}`);
       
-      const cardMsg = `🧾 <b>NEW TUITION PAYMENT</b>\n━━━━━━━━━━━━━━━━━━━━\n👤 <b>Student:</b> @${escapeHtml(username)}\n🆔 <b>ID:</b> <code>${userId}</code>\n🏫 <b>Program:</b> ${escapeHtml(chosenDeptTagged)}\n━━━━━━━━━━━━━━━━━━━━\n⚡️ <i>Please review the attached document below.</i>`;
+      const cardMsg = `🧾 <b>NEW DATA UPLOAD DETECTED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>👤 <b>Profile:</b> @${escapeHtml(username)}\n🆔 <b>UID:</b> <code>${userId}</code>\n🏫 <b>Target:</b> ${escapeHtml(chosenDeptTagged)}</blockquote>\n━━━━━━━━━━━━━━━━━━━━\n⚡️ <i>Analyze the appended media artifact below.</i>`;
       const sentTicketMsg = await ctx.api.sendMessage(staffGroupId, cardMsg, { message_thread_id: dbTopicId, parse_mode: 'HTML', reply_markup: kb });
 
       await clearPendingDepartment(userId);
-      const studentPanelMsg = await ctx.reply(STRINGS[lang].receiptReceived, { reply_markup: getStudentKeyboard(lang, 'PENDING') });
+      const studentPanelMsg = await ctx.reply(STRINGS[lang].receiptReceived, { parse_mode: 'HTML', reply_markup: getStudentKeyboard(lang, 'PENDING') });
       await pool.query(`INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, panel_msg_id, department, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PENDING')`, [userId, username, fileId, dbTopicId, forwardRes.message_id, sentTicketMsg.message_id, studentPanelMsg.message_id, chosenDeptTagged]);
     } catch (err) {
-      return ctx.reply(`❌ Submission error: ${err.message}`);
+      return ctx.reply(`❌ <b>ROUTING ERROR:</b> ${err.message}`, { parse_mode: 'HTML' });
     }
   }
 });
@@ -1482,7 +1491,7 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   const staffGroupId = await getActiveStaffGroupId();
 
   const updateRes = await pool.query("UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING department, username, panel_msg_id", [staffName, userId]);
-  if (updateRes.rowCount === 0) return ctx.reply("⚠️ Ticket not found or not pending.", { message_thread_id: topicId });
+  if (updateRes.rowCount === 0) return ctx.reply("⚠️ <b>ERROR:</b> Record already finalized.", { message_thread_id: topicId, parse_mode: 'HTML' });
 
   const { department, username, panel_msg_id } = updateRes.rows[0];
   const lang = await getUserLang(userId);
@@ -1490,8 +1499,8 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   if (panel_msg_id) {
     try { await ctx.api.editMessageReplyMarkup(userId, Number(panel_msg_id), { reply_markup: getStudentKeyboard(lang, 'APPROVED') }); } catch (e) {}
   }
-  try { await ctx.api.sendMessage(userId, STRINGS[lang].approvedMsg, { reply_markup: getStudentKeyboard(lang, 'APPROVED') }); } catch (e) {}
-  await ctx.editMessageText(`✅ <b>Payment Approved!</b>\n━━━━━━━━━━━━━━━━━━━━\n• <b>Student ID:</b> <code>${userId}</code>\n• <b>Username:</b> @${escapeHtml(username) || 'N/A'}\n• <b>Department:</b> ${escapeHtml(department)}\n• <b>Approved by:</b> ${escapeHtml(staffName)}`, { parse_mode: 'HTML' });
+  try { await ctx.api.sendMessage(userId, STRINGS[lang].approvedMsg, { parse_mode: 'HTML', reply_markup: getStudentKeyboard(lang, 'APPROVED') }); } catch (e) {}
+  await ctx.editMessageText(`✅ <b>APPROVAL AUTHORIZED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Target UID:</b> <code>${userId}</code>\n• <b>User Alias:</b> @${escapeHtml(username) || 'N/A'}\n• <b>Vector:</b> ${escapeHtml(department)}\n• <b>Cleared By:</b> ${escapeHtml(staffName)}</blockquote>`, { parse_mode: 'HTML' });
 
   if (APPROVED_THREAD_ID && staffGroupId) {
     await ctx.api.sendMessage(staffGroupId, await generateSummaryText('APPROVED'), { message_thread_id: APPROVED_THREAD_ID, parse_mode: 'HTML' });
@@ -1500,7 +1509,7 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
 
 bot.callbackQuery(/^rej_(\d+)_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  await ctx.editMessageText("❌ <b>Select rejection reason:</b>", { parse_mode: 'HTML', reply_markup: getRejectionReasonKeyboard(Number(ctx.match[1]), Number(ctx.match[2])) });
+  await ctx.editMessageText("❌ <b>INITIALIZE REJECTION SEQUENCE:</b>", { parse_mode: 'HTML', reply_markup: getRejectionReasonKeyboard(Number(ctx.match[1]), Number(ctx.match[2])) });
 });
 
 bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
@@ -1509,10 +1518,10 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   const topicId = Number(ctx.match[2]);
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `Staff`;
   const reasonObj = REJECTION_REASONS.find(r => r.code === ctx.match[3]);
-  const reasonText = reasonObj ? reasonObj.label : "Receipt details unverified";
+  const reasonText = reasonObj ? reasonObj.label : "Artifact Unverifiable";
 
   const updateRes = await pool.query(`UPDATE tickets SET status = 'REJECTED', rejection_reason = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP WHERE user_id = $3 AND status = 'PENDING' RETURNING panel_msg_id`, [reasonText, staffName, userId]);
-  if (updateRes.rowCount === 0) return ctx.reply("⚠️ Ticket not pending.", { message_thread_id: topicId });
+  if (updateRes.rowCount === 0) return ctx.reply("⚠️ <b>ERROR:</b> Database status mismatch.", { message_thread_id: topicId, parse_mode: 'HTML' });
 
   const lang = await getUserLang(userId);
   const customMessage = reasonObj ? (lang === 'am' ? reasonObj.message_am : reasonObj.message_en) : "Please re-upload.";
@@ -1523,7 +1532,7 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
 
   const resubmitKeyboard = new InlineKeyboard().text(STRINGS[lang].reuploadBtn, "start_resubmit");
   await ctx.api.sendMessage(userId, STRINGS[lang].rejectedMsg.replace('{reason}', escapeHtml(reasonText)).replace('{message}', customMessage), { parse_mode: 'HTML', reply_markup: resubmitKeyboard });
-  await ctx.editMessageText(`❌ <b>Receipt Rejected by ${escapeHtml(staffName)}</b>\n<blockquote><b>Reason:</b> ${escapeHtml(reasonText)}</blockquote>`, { parse_mode: 'HTML' });
+  await ctx.editMessageText(`❌ <b>REJECTION AUTHORIZED</b>\n<blockquote><b>Operator:</b> ${escapeHtml(staffName)}\n<b>Fault:</b> ${escapeHtml(reasonText)}</blockquote>`, { parse_mode: 'HTML' });
 });
 
 cron.schedule('0 8 * * *', async () => {
@@ -1531,7 +1540,7 @@ cron.schedule('0 8 * * *', async () => {
     const staffGroupId = await getActiveStaffGroupId();
     if (!staffGroupId) return;
     const pendingRes = await pool.query("SELECT COUNT(*) FROM tickets WHERE status = 'PENDING'");
-    const dailyReport = `🌅 <b>DAILY TUITION PORTAL SUMMARY</b>\n\n⏳ <b>Total Pending:</b> ${pendingRes.rows[0].count}\n\n---\n\n${await generateSummaryText('APPROVED')}\n\n---\n\n${await generateSummaryText('REJECTED')}`;
+    const dailyReport = `🌅 <b>SYSTEM CHRON REPORT (DAILY)</b>\n━━━━━━━━━━━━━━━━━━━━\n\n⏳ <b>Unprocessed Packets:</b> <code>${pendingRes.rows[0].count}</code>\n\n---\n\n${await generateSummaryText('APPROVED')}\n\n---\n\n${await generateSummaryText('REJECTED')}`;
     await bot.api.sendMessage(staffGroupId, dailyReport, { message_thread_id: APPROVED_THREAD_ID || null, parse_mode: 'HTML' });
   } catch (err) {}
 });
@@ -1549,12 +1558,12 @@ async function main() {
     await bot.api.deleteMyCommands({ scope: { type: 'all_chat_administrators' } });
 
     await bot.api.setMyCommands([
-      { command: 'start', description: 'Open Student Portal & Submit Receipt' }
+      { command: 'start', description: 'INITIALIZE PORTAL / VERIFICATION' }
     ], { scope: { type: 'all_private_chats' } });
 
     await bot.api.setMyCommands([
-      { command: 'panel', description: 'Open Staff Command Center Dashboard' },
-      { command: 'bind', description: 'Bind group as active staff panel' }
+      { command: 'panel', description: 'ACCESS COMMAND CENTER' },
+      { command: 'bind', description: 'SECURE GROUP CHANNEL' }
     ], { scope: { type: 'all_chat_administrators' } });
 
   } catch (cmdErr) {}
