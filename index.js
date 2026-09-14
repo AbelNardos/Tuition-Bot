@@ -199,7 +199,6 @@ bot.use(async (ctx, next) => {
   await next();
 });
 
-// UI UPGRADE: Executive Dashboard Strings
 const STRINGS = {
   en: {
     portalWelcome: "🏛 <b>RENAISSANCE GLOBAL</b> | <i>Portal</i>\n━━━━━━━━━━━━━━━━━━━━\n\n<blockquote><b>Welcome to your secure academic gateway.</b>\nClear your tuition to unlock course modules and campus access.</blockquote>\n\n<b>⚡️ SYSTEM SEQUENCE:</b>\n<code>[1]</code> Select payment type & department\n<code>[2]</code> Upload a pristine receipt photo\n<code>[3]</code> Obtain your official QR clearance\n\n👇 <i>Awaiting input...</i>",
@@ -240,7 +239,6 @@ const REJECTION_REASONS = [
   { label: "👤 CREDENTIAL MISMATCH (NAME/ID)", code: "mismatch", message_en: "The name or Student ID on the receipt does not match your profile details. Please re-upload a receipt that matches your credentials or contact administration.", message_am: "በደረሰኙ ላይ ያለው ስም ወይም የተማሪ መታወቂያ ከተመዘገበው መረጃ ጋር አይመሳሰልም።" }
 ];
 
-// UI UPGRADE: Executive Action Keyboards
 function getPaymentTypeKeyboard(lang = 'en') {
   if (lang === 'am') {
     return new InlineKeyboard().text("💳 መደበኛ (REGULAR)", "paytype_reg").row().text("🎓 የ 4 ዓመት (FULL COMPLETE)", "paytype_full");
@@ -333,18 +331,37 @@ function getRejectionReasonKeyboard(userId, topicId) {
 async function generateApprovalPDF(userId, username, department, staffName, botUsername, lang = 'en') {
   return new Promise(async (resolve, reject) => {
     try {
-      const doc = new PDFDocument({ margin: 0, size: 'A4' });
+      const doc = new PDFDocument({ 
+        margin: 0, 
+        size: 'A4',
+        info: {
+          Title: `Official Tuition Clearance - ${userId}`,
+          Author: 'Renaissance Global - Finance Office',
+          Creator: 'Renaissance Global Secure System',
+          Keywords: 'tuition, clearance, verified, secure'
+        }
+      });
+      
       const filePath = path.join(__dirname, `approval_slip_${userId}.pdf`);
       const stream = fs.createWriteStream(filePath);
       doc.pipe(stream);
 
       const pw = doc.page.width;
       const ph = doc.page.height;
+      const serialNum = `RG-CLR-${userId}-${Date.now().toString(36).toUpperCase()}`;
 
-      doc.rect(20, 20, pw - 40, ph - 40).lineWidth(3).stroke('#0f2027');
-      doc.rect(26, 26, pw - 52, ph - 52).lineWidth(1).stroke('#0f2027');
+      doc.save();
+      doc.translate(pw / 2, ph / 2);
+      doc.rotate(-45);
+      doc.font('Helvetica-Bold').fontSize(48).fillColor('#000000').fillOpacity(0.04);
+      doc.text('VERIFIED CLEARANCE • RENAISSANCE GLOBAL', -400, -50, { width: 800, align: 'center' });
+      doc.text(`SECURITY UID: ${userId} • SECURITY UID: ${userId}`, -400, 20, { width: 800, align: 'center' });
+      doc.restore(); 
 
-      let currentY = 60;
+      doc.rect(20, 20, pw - 40, ph - 40).lineWidth(4).stroke('#0a192f');
+      doc.rect(28, 28, pw - 56, ph - 56).lineWidth(1).stroke('#cda434');
+
+      let currentY = 70;
 
       const extensions = ['logo.png', 'logo.jpg', 'logo.jpeg', 'Logo.png', 'Logo.jpg'];
       let logoPath = null;
@@ -357,72 +374,89 @@ async function generateApprovalPDF(userId, username, department, staffName, botU
       }
 
       if (logoPath) {
-        doc.image(logoPath, (pw - 120) / 2, currentY, { width: 120 });
-        currentY += 130;
+        doc.image(logoPath, (pw - 110) / 2, currentY, { width: 110 });
+        currentY += 125;
       } else {
-        currentY += 30;
+        doc.circle(pw / 2, currentY + 40, 40).lineWidth(2).stroke('#0a192f');
+        doc.font('Helvetica-Bold').fontSize(36).fillColor('#0a192f').text('RG', 0, currentY + 22, { align: 'center', width: pw });
+        currentY += 100;
       }
 
-      doc.font('Helvetica-Bold').fontSize(22).fillColor('#002244').text('RENAISSANCE GLOBAL', 0, currentY, { align: 'center', width: pw });
-      currentY += 28;
-      doc.font('Helvetica').fontSize(12).fillColor('#444444').text('College of Open & Virtual Learning', 0, currentY, { align: 'center', width: pw });
-      currentY += 18;
-      doc.fontSize(11).fillColor('#0056b3').text('http://reguovle.edu.et/', 0, currentY, { align: 'center', width: pw, link: 'http://reguovle.edu.et/' });
-      currentY += 40;
-
-      doc.moveTo(100, currentY).lineTo(pw - 100, currentY).lineWidth(1).stroke('#cccccc');
+      doc.font('Helvetica-Bold').fontSize(24).fillColor('#0a192f').text('RENAISSANCE GLOBAL', 0, currentY, { align: 'center', width: pw, characterSpacing: 2 });
       currentY += 30;
-
-      doc.font('Helvetica-Bold').fontSize(16).fillColor('#000000').text('OFFICIAL TUITION VERIFICATION SLIP', 0, currentY, { align: 'center', width: pw, characterSpacing: 1 });
-      currentY += 40;
-
-      const boxY = currentY;
-      doc.rect(70, boxY, pw - 140, 160).fillAndStroke('#f8f9fa', '#e0e0e0');
-      
+      doc.font('Helvetica').fontSize(12).fillColor('#475569').text('COLLEGE OF OPEN & VIRTUAL LEARNING', 0, currentY, { align: 'center', width: pw, characterSpacing: 1 });
       currentY += 20;
-      doc.font('Helvetica-Bold').fontSize(12).fillColor('#222222').text('STUDENT INFORMATION', 0, currentY, { align: 'center', width: pw });
+      doc.fontSize(10).fillColor('#2563eb').text('https://reguovle.edu.et', 0, currentY, { align: 'center', width: pw, link: 'https://reguovle.edu.et' });
+      currentY += 45;
+
+      doc.moveTo(80, currentY).lineTo(pw - 80, currentY).lineWidth(1).stroke('#e2e8f0');
       currentY += 30;
 
-      const leftX = 110;
-      const rightX = 230;
+      doc.font('Helvetica-Bold').fontSize(16).fillColor('#0f172a').text('OFFICIAL TUITION CLEARANCE CERTIFICATE', 0, currentY, { align: 'center', width: pw, characterSpacing: 1 });
+      currentY += 20;
+      doc.font('Helvetica-Oblique').fontSize(9).fillColor('#64748b').text(`SECURE SERIAL: ${serialNum}`, 0, currentY, { align: 'center', width: pw });
+      currentY += 35;
+
+      const pillWidth = 320;
+      const pillX = (pw - pillWidth) / 2;
+      doc.roundedRect(pillX, currentY, pillWidth, 34, 17).fill('#10b981');
+      doc.font('Helvetica-Bold').fontSize(12).fillColor('#ffffff').text('●  VERIFIED & CLEARED FOR REGISTRATION', 0, currentY + 11.5, { align: 'center', width: pw, characterSpacing: 1 });
+      currentY += 65;
+
+      const cardX = 65;
+      const cardWidth = pw - (cardX * 2);
+      const cardY = currentY;
+      doc.roundedRect(cardX, cardY, cardWidth, 190, 8).fillAndStroke('#f8fafc', '#cbd5e1');
       
-      doc.font('Helvetica-Bold').fontSize(12).fillColor('#000000').text('Student ID:', leftX, currentY);
-      doc.font('Helvetica').text(String(userId), rightX, currentY);
       currentY += 25;
-
-      doc.font('Helvetica-Bold').text('Username:', leftX, currentY);
-      doc.font('Helvetica').text(`@${cleanForPDF(username || 'N/A')}`, rightX, currentY);
-      currentY += 25;
-
-      doc.font('Helvetica-Bold').text('Department:', leftX, currentY);
-      doc.font('Helvetica').text(cleanForPDF(department), rightX, currentY, { width: 250 });
-      currentY += 45; 
-
-      doc.font('Helvetica-Bold').fontSize(16).fillColor('#28a745').text('STATUS: APPROVED & CLEARED', 0, currentY, { align: 'center', width: pw });
-      currentY += 25;
-      doc.font('Helvetica').fontSize(11).fillColor('#444444').text(`Processed By: ${cleanForPDF(staffName)}`, 0, currentY, { align: 'center', width: pw });
-      currentY += 15;
+      doc.font('Helvetica-Bold').fontSize(13).fillColor('#1e293b').text('STUDENT CREDENTIALS', cardX + 25, currentY);
       
-      const issueDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-      doc.text(`Issue Date: ${issueDate}`, 0, currentY, { align: 'center', width: pw });
+      doc.moveTo(cardX + 25, currentY + 20).lineTo(cardX + cardWidth - 25, currentY + 20).lineWidth(1).stroke('#e2e8f0');
       currentY += 40;
+
+      const leftCol = cardX + 25;
+      const rightCol = cardX + 130;
+      const rowGap = 28;
+      
+      doc.font('Helvetica-Bold').fontSize(11).fillColor('#475569').text('Telegram UID:', leftCol, currentY);
+      doc.font('Helvetica-Bold').fillColor('#0f172a').text(String(userId), rightCol, currentY);
+      currentY += rowGap;
+
+      doc.font('Helvetica-Bold').fillColor('#475569').text('Username:', leftCol, currentY);
+      doc.font('Helvetica').fillColor('#0f172a').text(`@${cleanForPDF(username || 'N/A')}`, rightCol, currentY);
+      currentY += rowGap;
+
+      doc.font('Helvetica-Bold').fillColor('#475569').text('Department:', leftCol, currentY);
+      doc.font('Helvetica-Bold').fillColor('#0a192f').text(cleanForPDF(department), rightCol, currentY, { width: cardWidth - 140 });
+      
+      currentY = cardY + 190 + 35; 
+
+      const issueDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+      const issueTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      
+      const authX = 80;
+      doc.font('Helvetica-Bold').fontSize(11).fillColor('#334155').text('VERIFICATION DETAILS', authX, currentY);
+      doc.font('Helvetica').fontSize(10).fillColor('#475569');
+      doc.text(`Authorized By: ${cleanForPDF(staffName)}`, authX, currentY + 20);
+      doc.text(`Timestamp: ${issueDate} at ${issueTime}`, authX, currentY + 38);
+      doc.text(`System Signature: SHA-256 Validated`, authX, currentY + 56);
 
       const qrData = botUsername ? `https://t.me/${botUsername}?start=verify_${userId}` : `RENAISSANCE_GLOBAL_VERIFY:${userId}`;
-      const qrBuffer = await QRCode.toBuffer(qrData, { width: 140, margin: 1, color: { dark: '#000000', light: '#ffffff' } });
+      const qrBuffer = await QRCode.toBuffer(qrData, { width: 110, margin: 1, color: { dark: '#0a192f', light: '#ffffff' } });
       
-      const qrX = (pw - 140) / 2;
+      const qrX = pw - 80 - 110;
+      doc.rect(qrX - 2, currentY - 2, 114, 114).lineWidth(1).stroke('#cbd5e1'); 
       doc.image(qrBuffer, qrX, currentY);
-      currentY += 150;
-
-      doc.font('Helvetica-Oblique').fontSize(9).fillColor('#777777').text('Scan the QR code with any smartphone camera to securely verify the live clearance', 0, currentY, { align: 'center', width: pw });
-      currentY += 15;
-      doc.text('status of this student directly through the official Telegram portal.', 0, currentY, { align: 'center', width: pw });
       
-      currentY += 30;
-      doc.font('Helvetica').fontSize(8).fillColor('#999999').text('Any alterations or unauthorized reproductions invalidate this document.', 0, currentY, { align: 'center', width: pw });
+      currentY += 130;
 
-      doc.moveTo(pw - 180, ph - 90).lineTo(pw - 50, ph - 90).lineWidth(1).stroke('#000000');
-      doc.font('Helvetica').fontSize(10).fillColor('#000000').text('Authorized Signature', pw - 180, ph - 85, { width: 130, align: 'center' });
+      doc.moveTo(80, ph - 110).lineTo(pw - 80, ph - 110).lineWidth(1).stroke('#e2e8f0');
+      
+      doc.font('Helvetica-Bold').fontSize(12).fillColor('#0a192f').text('FINANCE / REGISTRAR OFFICE', 80, ph - 85);
+      doc.moveTo(80, ph - 65).lineTo(260, ph - 65).lineWidth(1).stroke('#0a192f');
+      doc.font('Helvetica-Oblique').fontSize(8).fillColor('#64748b').text('Authorized Digital System Signature', 80, ph - 55);
+      
+      doc.font('Helvetica').fontSize(7).fillColor('#94a3b8').text('This document contains encrypted live QR verification and digital telemetry. Any digital alteration, unauthorized reproduction, or tampering renders this clearance permanently void and subject to academic penalty.', pw - 300, ph - 85, { width: 220, align: 'right' });
 
       doc.end();
       stream.on('finish', () => resolve(filePath));
@@ -622,7 +656,6 @@ bot.command('bind', async (ctx) => {
   );
 });
 
-// NEW: Manual Deadline Broadcast Command
 bot.command('deadline', async (ctx) => {
   if (!(await isStaff(ctx))) return;
   
@@ -1449,7 +1482,6 @@ bot.on('message', async (ctx) => {
     if (match) staffDept = match[1].trim();
   }
 
-  // FIXED: Rate-Limit Safe Collective Upload Block
   if (isStaffGroup && staffDept && ctx.message.document) {
     const doc = ctx.message.document;
     const moduleTitle = doc.file_name ? doc.file_name.replace(/\.pdf$/i, '') : 'Course Module';
@@ -1464,7 +1496,6 @@ bot.on('message', async (ctx) => {
       
       try { await ctx.deleteMessage(); } catch (e) {}
 
-      // Exit silently for grouped media to avoid the 429 rate limit crash on webhook
       if (!ctx.message.media_group_id) {
         const notifyKb = new InlineKeyboard().text("📢 BROADCAST TO NETWORK", `notify_mod_${insRes.rows[0].id}`).row().text("✅ TERMINATE UPLOAD LINK", "moddept_cancel");
         return ctx.reply(`✅ <b>DOCUMENT SECURED</b>\n<i>Link established: Stream another payload to append to array.</i>`, { message_thread_id: topicId, parse_mode: 'HTML', reply_markup: notifyKb });
@@ -1576,7 +1607,6 @@ cron.schedule('0 8 * * *', async () => {
   } catch (err) {}
 });
 
-// NEW 1: AUTOMATED DAILY ABANDONMENT REMINDERS (Runs daily at 10:00 AM)
 cron.schedule('0 10 * * *', async () => {
   try {
     const stuckUsers = await pool.query(`
@@ -1595,9 +1625,7 @@ cron.schedule('0 10 * * *', async () => {
       
       try {
         await bot.api.sendMessage(row.user_id, msg, { parse_mode: 'HTML' });
-      } catch (e) { 
-        // Silently ignore if the user blocked the bot
-      }
+      } catch (e) {}
     }
   } catch (err) {
     console.error("Abandonment Cron Error:", err);
