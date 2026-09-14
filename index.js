@@ -622,6 +622,36 @@ bot.command('bind', async (ctx) => {
   );
 });
 
+// NEW: Manual Deadline Broadcast Command
+bot.command('deadline', async (ctx) => {
+  if (!(await isStaff(ctx))) return;
+  
+  const unapprovedUsers = await pool.query(`
+    SELECT DISTINCT u.user_id, u.language 
+    FROM user_settings u
+    LEFT JOIN tickets t ON u.user_id = t.user_id AND t.status = 'APPROVED'
+    WHERE t.user_id IS NULL
+  `);
+
+  let sent = 0;
+  await ctx.reply(`📢 <b>INITIATING DEADLINE BROADCAST:</b> Targeting <code>${unapprovedUsers.rows.length}</code> unapproved students...`, { parse_mode: 'HTML' });
+
+  for (const row of unapprovedUsers.rows) {
+    const lang = row.language || 'en';
+    const msg = lang === 'am'
+      ? `🚨 <b>የመጨረሻ ማሳሰቢያ: የክፍያ ጊዜው ሊያበቃ ነው</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>በሲስተማችን ላይ እስካሁን የክፍያ ማረጋገጫዎ አልጸደቀም። ሞጁሎች ከመቆለፋቸው በፊት እባክዎን ደረሰኝዎን አሁኑኑ ያስገቡ!</blockquote>`
+      : `🚨 <b>CRITICAL DEADLINE WARNING</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>Our database indicates you do not have an APPROVED tuition clearance.</blockquote>\n\n<i>Failure to submit your receipt will result in locked course modules and revoked campus access. Please submit immediately.</i>`;
+    
+    try {
+      const kb = new InlineKeyboard().text(lang === 'am' ? "📤 ደረሰኝ አስገባ" : "📤 TRANSMIT RECEIPT", "start_resubmit");
+      await bot.api.sendMessage(row.user_id, msg, { parse_mode: 'HTML', reply_markup: kb });
+      sent++;
+    } catch (e) {}
+  }
+  
+  await ctx.reply(`✅ <b>DEADLINE BROADCAST COMPLETE</b>\nDelivered to <code>${sent}</code> pending/unregistered students.`, { parse_mode: 'HTML' });
+});
+
 bot.command('start', async (ctx) => {
   if (ctx.match && typeof ctx.match === 'string' && ctx.match.startsWith('verify_')) {
     const verifyId = ctx.match.replace('verify_', '').trim();
@@ -1057,6 +1087,7 @@ bot.callbackQuery(/^roster_(.+)$/, async (ctx) => {
     await ctx.reply(text, { parse_mode: 'HTML' });
   }
 });
+
 bot.callbackQuery(/^notify_mod_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   if (!(await isStaff(ctx))) return;
@@ -1545,6 +1576,34 @@ cron.schedule('0 8 * * *', async () => {
   } catch (err) {}
 });
 
+// NEW 1: AUTOMATED DAILY ABANDONMENT REMINDERS (Runs daily at 10:00 AM)
+cron.schedule('0 10 * * *', async () => {
+  try {
+    const stuckUsers = await pool.query(`
+      SELECT u.user_id, u.language, u.pending_department 
+      FROM user_settings u
+      LEFT JOIN tickets t ON u.user_id = t.user_id AND t.status IN ('PENDING', 'APPROVED')
+      WHERE u.pending_department IS NOT NULL 
+      AND t.user_id IS NULL
+    `);
+
+    for (const row of stuckUsers.rows) {
+      const lang = row.language || 'en';
+      const msg = lang === 'am' 
+        ? `⚠️ <b>ማሳሰቢያ: ማመልከቻዎ አልተጠናቀቀም!</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>ለ <b>${escapeHtml(row.pending_department)}</b> ምዝገባ ጀምረዋል፣ ነገር ግን የክፍያ ደረሰኝ አላስገቡም።</blockquote>\n\n<i>እባክዎን ሂደቱን ለማጠናቀቅ የክፍያ ደረሰኝዎን ፎቶ አሁን ይላኩ።</i>`
+        : `⚠️ <b>SYSTEM ALERT: INCOMPLETE REGISTRATION</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>You initiated clearance for <b>${escapeHtml(row.pending_department)}</b> but have not transmitted a receipt photo.</blockquote>\n\n<i>Please upload your receipt image now to secure your clearance and unlock the module vault.</i>`;
+      
+      try {
+        await bot.api.sendMessage(row.user_id, msg, { parse_mode: 'HTML' });
+      } catch (e) { 
+        // Silently ignore if the user blocked the bot
+      }
+    }
+  } catch (err) {
+    console.error("Abandonment Cron Error:", err);
+  }
+});
+
 app.use('/webhook', webhookCallback(bot, 'express'));
 app.get('/', (req, res) => res.send('Tuition Receipt Bot is active'));
 
@@ -1563,7 +1622,8 @@ async function main() {
 
     await bot.api.setMyCommands([
       { command: 'panel', description: 'ACCESS COMMAND CENTER' },
-      { command: 'bind', description: 'SECURE GROUP CHANNEL' }
+      { command: 'bind', description: 'SECURE GROUP CHANNEL' },
+      { command: 'deadline', description: 'BROADCAST MISSING PAYMENT WARNING' }
     ], { scope: { type: 'all_chat_administrators' } });
 
   } catch (cmdErr) {}
