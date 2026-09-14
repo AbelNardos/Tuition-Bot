@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const { Bot, InlineKeyboard, InputFile, webhookCallback } = require('grammy');
+const { Bot, InlineKeyboard, Keyboard, InputFile, webhookCallback } = require('grammy');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
@@ -83,7 +83,8 @@ async function initDB() {
       user_id BIGINT PRIMARY KEY,
       language TEXT DEFAULT 'en',
       pending_department TEXT,
-      pending_module_dept TEXT
+      pending_module_dept TEXT,
+      phone_number TEXT
     );
 
     CREATE TABLE IF NOT EXISTS department_topics (
@@ -115,6 +116,7 @@ async function initDB() {
   try { await pool.query(`ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS pending_department TEXT;`); } catch (err) {}
   try { await pool.query(`ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS pending_module_dept TEXT;`); } catch (err) {}
   try { await pool.query(`ALTER TABLE group_settings ADD COLUMN IF NOT EXISTS modules_topic_id BIGINT;`); } catch (err) {}
+  try { await pool.query(`ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS phone_number TEXT;`); } catch (err) {}
 }
 
 async function getActiveStaffGroupId() {
@@ -183,6 +185,38 @@ async function isStaff(ctx) {
     return ['creator', 'administrator', 'member'].includes(member.status);
   } catch (err) {
     return false;
+  }
+}
+
+// 📌 GOOGLE SHEETS TELEMETRY FUNCTION (9 COLUMNS)
+async function pushToGoogleSheet(userId, username, dept, status, staffName, reasonText = '') {
+  const webhook = process.env.GOOGLE_SHEETS_WEBHOOK;
+  if (!webhook) return;
+
+  try {
+    const userRes = await pool.query('SELECT phone_number, language FROM user_settings WHERE user_id = $1', [userId]);
+    const phone = userRes.rows[0]?.phone_number || 'N/A';
+    const lang = userRes.rows[0]?.language || 'en';
+
+    const payload = {
+      id: String(userId),
+      username: username ? `@${username.replace('@', '')}` : 'N/A',
+      phone: phone,
+      dept: dept || 'Unknown',
+      status: status,
+      reason: reasonText,
+      staff: staffName || 'System Action',
+      time: new Date().toLocaleString('en-US', { timeZone: 'Africa/Addis_Ababa' }),
+      lang: lang
+    };
+
+    await fetch(webhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+  } catch (err) {
+    console.error("Google Sheets Sync Error:", err.message);
   }
 }
 
@@ -751,27 +785,46 @@ bot.command('panel', async (ctx) => {
   );
 });
 
+// 📌 NEW: CONTACT HANDLER
+bot.on('message:contact', async (ctx) => {
+  if (ctx.chat.type === 'private') {
+    const phone = ctx.message.contact.phone_number;
+    await pool.query('UPDATE user_settings SET phone_number = $1 WHERE user_id = $2', [phone, ctx.from.id]);
+    
+    const lang = await getUserLang(ctx.from.id);
+    
+    // Remove the keyboard seamlessly
+    await ctx.reply(lang === 'am' ? "✅ <b>ስልክዎ ተመዝግቧል!</b>" : "✅ <b>Profile Verified!</b>", { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
+    
+    // Resume standard flow
+    await ctx.reply(STRINGS[lang].portalWelcome, { parse_mode: 'HTML', reply_markup: getStudentKeyboard(lang, null) });
+  }
+});
+
 async function executeRevoke(ctx, targetUserId, topicId) {
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `Staff`;
+  const reasonText = 'Approval revoked by administration (Verification error / Audit mismatch)';
 
   const updateRes = await pool.query(
     `UPDATE tickets 
      SET status = 'REJECTED', 
-         rejection_reason = 'Approval revoked by administration (Verification error / Audit mismatch)', 
-         processed_by = $1, 
+         rejection_reason = $1, 
+         processed_by = $2, 
          updated_at = CURRENT_TIMESTAMP 
      WHERE id = (
-       SELECT id FROM tickets WHERE user_id = $2 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1
-     ) RETURNING department, panel_msg_id`,
-    [staffName, targetUserId]
+       SELECT id FROM tickets WHERE user_id = $3 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1
+     ) RETURNING department, username, panel_msg_id`,
+    [reasonText, staffName, targetUserId]
   );
 
   if (updateRes.rowCount === 0) {
     return ctx.reply(`⚠️ <b>OVERRIDE FAILED:</b> No approved record found to revoke for UID <code>${targetUserId}</code>.`, { message_thread_id: topicId, parse_mode: 'HTML' });
   }
 
-  const { department, panel_msg_id } = updateRes.rows[0];
+  const { department, username, panel_msg_id } = updateRes.rows[0];
   const studentLang = await getUserLang(targetUserId);
+
+  pushToGoogleSheet(targetUserId, username, department, 'REVOKED', staffName, reasonText);
 
   if (panel_msg_id) {
     try {
@@ -918,7 +971,7 @@ bot.callbackQuery(/^chgdept_(\d+)_(mkt|biz|acc|agri|ed|log|cancel)$/, async (ctx
   };
 
   const ticketRes = await pool.query(
-    "SELECT id, department FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1",
+    "SELECT id, department, username FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1",
     [targetUserId]
   );
 
@@ -927,6 +980,7 @@ bot.callbackQuery(/^chgdept_(\d+)_(mkt|biz|acc|agri|ed|log|cancel)$/, async (ctx
   }
 
   const oldDept = ticketRes.rows[0].department || '';
+  const username = ticketRes.rows[0].username || '';
   const planSuffix = oldDept.includes("(4-Year Complete)") ? "(4-Year Complete)" : "(Regular / Term)";
   const newFullDept = `${deptMap[deptCode]} ${planSuffix}`;
 
@@ -934,6 +988,8 @@ bot.callbackQuery(/^chgdept_(\d+)_(mkt|biz|acc|agri|ed|log|cancel)$/, async (ctx
     "UPDATE tickets SET department = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3",
     [newFullDept, staffName, ticketRes.rows[0].id]
   );
+
+  pushToGoogleSheet(targetUserId, username, newFullDept, 'APPROVED', staffName, 'Department Overridden');
 
   await ctx.editMessageText(
     `✅ <b>DEPARTMENT OVERRIDE SUCCESSFUL</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Target UID:</b> <code>${targetUserId}</code>\n• <b>New Assignment:</b> ${escapeHtml(newFullDept)}\n• <b>Authorized By:</b> ${escapeHtml(staffName)}</blockquote>\n\n<i>The user's Module Vault has been automatically synced to the new assignment.</i>`,
@@ -1189,10 +1245,28 @@ bot.callbackQuery('cmd_mod_analytics', async (ctx) => {
   await ctx.reply(text, { message_thread_id: topicId, parse_mode: 'HTML' });
 });
 
+// 📌 NEW: LANGUAGE SELECTION & CONTACT LOCK
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const lang = ctx.match[1];
   await setUserLang(ctx.from.id, lang);
+  
+  const phoneRes = await pool.query('SELECT phone_number FROM user_settings WHERE user_id = $1', [ctx.from.id]);
+  
+  if (!phoneRes.rows[0] || !phoneRes.rows[0].phone_number) {
+    const kb = new Keyboard().requestContact(lang === 'am' ? '📱 ስልክ ቁጥር አጋራ' : '📱 Share Phone Number').resized().oneTime();
+    
+    // We safely delete the inline message so it doesn't clutter the chat
+    try { await ctx.deleteMessage(); } catch (e) {}
+    
+    return ctx.reply(
+      lang === 'am' 
+        ? "⚠️ <b>ማረጋገጫ ያስፈልጋል:</b>\nእባክዎን ከታች ያለውን 'ስልክ ቁጥር አጋራ' የሚለውን ቁልፍ በመጫን ስልክዎን ያጋሩ።"
+        : "⚠️ <b>VERIFICATION REQUIRED:</b>\nPlease tap the 'Share Phone Number' button below to register your profile.",
+      { parse_mode: 'HTML', reply_markup: kb }
+    );
+  }
+
   await ctx.editMessageText(STRINGS[lang].portalWelcome, { parse_mode: 'HTML', reply_markup: getStudentKeyboard(lang, null) });
 });
 
@@ -1476,6 +1550,21 @@ bot.on('message', async (ctx) => {
   const isPrivate = ctx.chat.type === 'private';
   const topicId = ctx.message.message_thread_id;
 
+  // 📌 NEW: STRICT CONTACT LOCK FOR PRIVATE CHAT
+  if (isPrivate && !ctx.message.contact) {
+    const phoneCheck = await pool.query('SELECT phone_number FROM user_settings WHERE user_id = $1', [ctx.from.id]);
+    if (!phoneCheck.rows.length || !phoneCheck.rows[0].phone_number) {
+      const lang = await getUserLang(ctx.from.id);
+      const kb = new Keyboard().requestContact(lang === 'am' ? '📱 ስልክ ቁጥር አጋራ' : '📱 Share Phone Number').resized().oneTime();
+      return ctx.reply(
+        lang === 'am' 
+          ? "⚠️ <b>ስህተት:</b> እባክዎን ከታች ያለውን 'ስልክ ቁጥር አጋራ' ቁልፍ ይጫኑ።"
+          : "⚠️ <b>ACCESS DENIED:</b> Please tap the 'Share Phone Number' button below to continue.",
+        { parse_mode: 'HTML', reply_markup: kb }
+      );
+    }
+  }
+
   let staffDept = await getStaffPendingModuleDept(ctx.from.id);
   if (!staffDept && ctx.message.reply_to_message?.text) {
     const match = ctx.message.reply_to_message.text.match(/TARGET LOCKED:\s*([^\n]+)/);
@@ -1514,7 +1603,7 @@ bot.on('message', async (ctx) => {
     if (orig.includes("INITIATE STATUS REVOCATION")) return executeRevoke(ctx, Number(ctx.message.text.trim()), topicId);
   }
 
-  if (isPrivate) {
+  if (isPrivate && !ctx.message.contact) {
     const userId = ctx.from.id;
     const lang = await getUserLang(userId);
     const activeCheck = await pool.query("SELECT 1 FROM tickets WHERE user_id = $1 AND status = 'PENDING' LIMIT 1", [userId]);
@@ -1537,6 +1626,9 @@ bot.on('message', async (ctx) => {
       const sentTicketMsg = await ctx.api.sendMessage(staffGroupId, cardMsg, { message_thread_id: dbTopicId, parse_mode: 'HTML', reply_markup: kb });
 
       await clearPendingDepartment(userId);
+      
+      pushToGoogleSheet(userId, username, chosenDeptTagged, 'PENDING', 'Awaiting Review', '');
+
       const studentPanelMsg = await ctx.reply(STRINGS[lang].receiptReceived, { parse_mode: 'HTML', reply_markup: getStudentKeyboard(lang, 'PENDING') });
       await pool.query(`INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, panel_msg_id, department, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PENDING')`, [userId, username, fileId, dbTopicId, forwardRes.message_id, sentTicketMsg.message_id, studentPanelMsg.message_id, chosenDeptTagged]);
     } catch (err) {
@@ -1557,6 +1649,8 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
 
   const { department, username, panel_msg_id } = updateRes.rows[0];
   const lang = await getUserLang(userId);
+
+  pushToGoogleSheet(userId, username, department, 'APPROVED', staffName, '');
 
   if (panel_msg_id) {
     try { await ctx.api.editMessageReplyMarkup(userId, Number(panel_msg_id), { reply_markup: getStudentKeyboard(lang, 'APPROVED') }); } catch (e) {}
@@ -1582,14 +1676,17 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   const reasonObj = REJECTION_REASONS.find(r => r.code === ctx.match[3]);
   const reasonText = reasonObj ? reasonObj.label : "Artifact Unverifiable";
 
-  const updateRes = await pool.query(`UPDATE tickets SET status = 'REJECTED', rejection_reason = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP WHERE user_id = $3 AND status = 'PENDING' RETURNING panel_msg_id`, [reasonText, staffName, userId]);
+  const updateRes = await pool.query(`UPDATE tickets SET status = 'REJECTED', rejection_reason = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP WHERE user_id = $3 AND status = 'PENDING' RETURNING panel_msg_id, department, username`, [reasonText, staffName, userId]);
   if (updateRes.rowCount === 0) return ctx.reply("⚠️ <b>ERROR:</b> Database status mismatch.", { message_thread_id: topicId, parse_mode: 'HTML' });
 
+  const { panel_msg_id, department, username } = updateRes.rows[0];
   const lang = await getUserLang(userId);
   const customMessage = reasonObj ? (lang === 'am' ? reasonObj.message_am : reasonObj.message_en) : "Please re-upload.";
 
-  if (updateRes.rows[0].panel_msg_id) {
-    try { await ctx.api.editMessageReplyMarkup(userId, Number(updateRes.rows[0].panel_msg_id), { reply_markup: getStudentKeyboard(lang, 'REJECTED') }); } catch (e) {}
+  pushToGoogleSheet(userId, username, department, 'REJECTED', staffName, reasonText);
+
+  if (panel_msg_id) {
+    try { await ctx.api.editMessageReplyMarkup(userId, Number(panel_msg_id), { reply_markup: getStudentKeyboard(lang, 'REJECTED') }); } catch (e) {}
   }
 
   const resubmitKeyboard = new InlineKeyboard().text(STRINGS[lang].reuploadBtn, "start_resubmit");
