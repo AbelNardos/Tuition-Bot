@@ -198,7 +198,6 @@ async function pushToGoogleSheet(userId, username, fullDept, status, staffName, 
     const phone = userRes.rows[0]?.phone_number || 'N/A';
     const lang = userRes.rows[0]?.language || 'en';
 
-    // Separate Department from Plan Type
     let planType = 'Unknown';
     let cleanDept = fullDept || 'Unknown';
 
@@ -220,7 +219,7 @@ async function pushToGoogleSheet(userId, username, fullDept, status, staffName, 
       reason: reasonText,
       staff: staffName || 'System Action',
       time: new Date().toLocaleString('en-US', { timeZone: 'Africa/Addis_Ababa' }),
-      lang: lang.toUpperCase() // Output as 'AM' or 'EN'
+      lang: lang.toUpperCase()
     };
 
     await fetch(webhook, {
@@ -798,7 +797,6 @@ bot.command('panel', async (ctx) => {
   );
 });
 
-// 📌 NEW: CONTACT HANDLER
 bot.on('message:contact', async (ctx) => {
   if (ctx.chat.type === 'private') {
     const phone = ctx.message.contact.phone_number;
@@ -806,10 +804,8 @@ bot.on('message:contact', async (ctx) => {
     
     const lang = await getUserLang(ctx.from.id);
     
-    // Remove the keyboard seamlessly
     await ctx.reply(lang === 'am' ? "✅ <b>ስልክዎ ተመዝግቧል!</b>" : "✅ <b>Profile Verified!</b>", { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
     
-    // Resume standard flow
     await ctx.reply(STRINGS[lang].portalWelcome, { parse_mode: 'HTML', reply_markup: getStudentKeyboard(lang, null) });
   }
 });
@@ -1258,7 +1254,6 @@ bot.callbackQuery('cmd_mod_analytics', async (ctx) => {
   await ctx.reply(text, { message_thread_id: topicId, parse_mode: 'HTML' });
 });
 
-// 📌 NEW: LANGUAGE SELECTION & CONTACT LOCK
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const lang = ctx.match[1];
@@ -1544,6 +1539,10 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
   const newTicketMsg = await ctx.api.sendMessage(staffGroupId, `🧾 <b>NEW DATA UPLOAD DETECTED (TRANSFERRED)</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>👤 <b>Profile:</b> @${escapeHtml(ticketRes.rows[0].username)}\n🆔 <b>UID:</b> <code>${targetUserId}</code>\n🏫 <b>Target:</b> ${escapeHtml(newDeptTagged)}</blockquote>\n━━━━━━━━━━━━━━━━━━━━\n⚡️ <i>Analyze the appended media artifact below.</i>`, { message_thread_id: newTopicId, parse_mode: 'HTML', reply_markup: kb });
 
   await pool.query(`UPDATE tickets SET department = $1, topic_id = $2, message_id = $3, ticket_msg_id = $4, updated_at = CURRENT_TIMESTAMP WHERE user_id = $5 AND status = 'PENDING'`, [newDeptTagged, newTopicId, newForwardRes.message_id, newTicketMsg.message_id, targetUserId]);
+  
+  // 📌 INSTANT GOOGLE SHEETS SYNC ON PENDING TRANSFER
+  pushToGoogleSheet(targetUserId, ticketRes.rows[0].username, newDeptTagged, 'PENDING', 'System Action', 'Transferred / Awaiting Review');
+
   try { await ctx.api.deleteMessage(staffGroupId, Number(ticketRes.rows[0].message_id)); } catch (e) {}
   try { await ctx.api.deleteMessage(staffGroupId, Number(ticketRes.rows[0].ticket_msg_id)); } catch (e) {}
 
@@ -1562,7 +1561,6 @@ bot.on('message', async (ctx) => {
   const isPrivate = ctx.chat.type === 'private';
   const topicId = ctx.message.message_thread_id;
 
-  // 📌 NEW: STRICT CONTACT LOCK FOR PRIVATE CHAT
   if (isPrivate && !ctx.message.contact) {
     const phoneCheck = await pool.query('SELECT phone_number FROM user_settings WHERE user_id = $1', [ctx.from.id]);
     if (!phoneCheck.rows.length || !phoneCheck.rows[0].phone_number) {
