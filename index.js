@@ -188,8 +188,8 @@ async function isStaff(ctx) {
   }
 }
 
-// 📌 GOOGLE SHEETS TELEMETRY FUNCTION (9 COLUMNS)
-async function pushToGoogleSheet(userId, username, dept, status, staffName, reasonText = '') {
+// 📌 GOOGLE SHEETS TELEMETRY FUNCTION (10 COLUMNS)
+async function pushToGoogleSheet(userId, username, fullDept, status, staffName, reasonText = '') {
   const webhook = process.env.GOOGLE_SHEETS_WEBHOOK;
   if (!webhook) return;
 
@@ -198,16 +198,29 @@ async function pushToGoogleSheet(userId, username, dept, status, staffName, reas
     const phone = userRes.rows[0]?.phone_number || 'N/A';
     const lang = userRes.rows[0]?.language || 'en';
 
+    // Separate Department from Plan Type
+    let planType = 'Unknown';
+    let cleanDept = fullDept || 'Unknown';
+
+    if (cleanDept.includes('(4-Year Complete)')) {
+      planType = '4-Year Complete';
+      cleanDept = cleanDept.replace(/\s*\((4-Year Complete)\)$/, '').trim();
+    } else if (cleanDept.includes('(Regular / Term)')) {
+      planType = 'Regular / Term';
+      cleanDept = cleanDept.replace(/\s*\((Regular \/ Term)\)$/, '').trim();
+    }
+
     const payload = {
       id: String(userId),
       username: username ? `@${username.replace('@', '')}` : 'N/A',
       phone: phone,
-      dept: dept || 'Unknown',
+      dept: cleanDept,
+      plan: planType,
       status: status,
       reason: reasonText,
       staff: staffName || 'System Action',
       time: new Date().toLocaleString('en-US', { timeZone: 'Africa/Addis_Ababa' }),
-      lang: lang
+      lang: lang.toUpperCase() // Output as 'AM' or 'EN'
     };
 
     await fetch(webhook, {
@@ -1256,7 +1269,6 @@ bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   if (!phoneRes.rows[0] || !phoneRes.rows[0].phone_number) {
     const kb = new Keyboard().requestContact(lang === 'am' ? '📱 ስልክ ቁጥር አጋራ' : '📱 Share Phone Number').resized().oneTime();
     
-    // We safely delete the inline message so it doesn't clutter the chat
     try { await ctx.deleteMessage(); } catch (e) {}
     
     return ctx.reply(
