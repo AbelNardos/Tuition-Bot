@@ -188,7 +188,6 @@ async function isStaff(ctx) {
   }
 }
 
-// 📌 GOOGLE SHEETS TELEMETRY FUNCTION (10 COLUMNS)
 async function pushToGoogleSheet(userId, username, fullDept, status, staffName, reasonText = '') {
   const webhook = process.env.GOOGLE_SHEETS_WEBHOOK;
   if (!webhook) return;
@@ -1540,7 +1539,6 @@ bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
 
   await pool.query(`UPDATE tickets SET department = $1, topic_id = $2, message_id = $3, ticket_msg_id = $4, updated_at = CURRENT_TIMESTAMP WHERE user_id = $5 AND status = 'PENDING'`, [newDeptTagged, newTopicId, newForwardRes.message_id, newTicketMsg.message_id, targetUserId]);
   
-  // 📌 INSTANT GOOGLE SHEETS SYNC ON PENDING TRANSFER
   pushToGoogleSheet(targetUserId, ticketRes.rows[0].username, newDeptTagged, 'PENDING', 'System Action', 'Transferred / Awaiting Review');
 
   try { await ctx.api.deleteMessage(staffGroupId, Number(ticketRes.rows[0].message_id)); } catch (e) {}
@@ -1738,6 +1736,86 @@ cron.schedule('0 10 * * *', async () => {
     console.error("Abandonment Cron Error:", err);
   }
 });
+
+// --- API ENDPOINTS FOR REACT FRONTEND ---
+
+app.get('/api/student/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const ticketRes = await pool.query(
+      "SELECT user_id, username, department, status, rejection_reason, updated_at FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1",
+      [userId]
+    );
+    
+    if (ticketRes.rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Student record not found" });
+    }
+
+    const settingsRes = await pool.query("SELECT phone_number, language FROM user_settings WHERE user_id = $1", [userId]);
+    
+    res.json({
+      success: true,
+      data: {
+        ...ticketRes.rows[0],
+        phone_number: settingsRes.rows[0]?.phone_number || null,
+        language: settingsRes.rows[0]?.language || 'en'
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/modules/:department', async (req, res) => {
+  try {
+    const dept = decodeURIComponent(req.params.department);
+    const mods = await pool.query(
+      "SELECT id, title, file_name, created_at FROM department_modules WHERE department ILIKE $1 ORDER BY id ASC",
+      [`%${dept}%`]
+    );
+    res.json({ success: true, count: mods.rows.length, data: mods.rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/roster', async (req, res) => {
+  try {
+    const roster = await pool.query(`
+      SELECT t.user_id, t.username, t.department, t.updated_at 
+      FROM tickets t
+      INNER JOIN (
+        SELECT user_id, MAX(updated_at) as max_date FROM tickets WHERE status = 'APPROVED' GROUP BY user_id
+      ) latest ON t.user_id = latest.user_id AND t.updated_at = latest.max_date
+      WHERE t.status = 'APPROVED'
+      ORDER BY t.department ASC
+    `);
+    res.json({ success: true, count: roster.rows.length, data: roster.rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/stats', async (req, res) => {
+  try {
+    const approved = await pool.query("SELECT department, COUNT(*) as count FROM tickets WHERE status = 'APPROVED' GROUP BY department");
+    const pending = await pool.query("SELECT department, COUNT(*) as count FROM tickets WHERE status = 'PENDING' GROUP BY department");
+    const rejected = await pool.query("SELECT department, COUNT(*) as count FROM tickets WHERE status = 'REJECTED' GROUP BY department");
+    
+    res.json({
+      success: true,
+      stats: {
+        approved: approved.rows,
+        pending: pending.rows,
+        rejected: rejected.rows
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- EXPRESS WEBHOOK & SERVER INIT ---
 
 app.use('/webhook', webhookCallback(bot, 'express'));
 app.get('/', (req, res) => res.send('Tuition Receipt Bot is active'));
