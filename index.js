@@ -8,9 +8,11 @@ const https = require('https');
 const cron = require('node-cron');
 const PDFDocument = require('pdfkit');
 const QRCode = require('qrcode');
+const cors = require('cors');
 
 const app = express();
 app.use(express.json());
+app.use(cors());
 
 const PORT = process.env.PORT || 10000;
 const bot = new Bot(process.env.BOT_TOKEN);
@@ -36,6 +38,74 @@ setInterval(() => {
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
+});
+
+// POST ROUTE FOR REACT DASHBOARD BROADCASTS
+app.post('/api/broadcast', async (req, res) => {
+  const { message } = req.body;
+
+  try {
+    const { rows } = await pool.query('SELECT DISTINCT user_id FROM user_settings WHERE user_id IS NOT NULL');
+    let successCount = 0;
+
+    for (const row of rows) {
+      try {
+        await bot.api.sendMessage(row.user_id, `📢 **RENAISSANCE GLOBAL ALERT**\n\n${message}`);
+        successCount++;
+      } catch (err) {
+        console.error(`Failed to send to ${row.user_id}:`, err.message);
+      }
+    }
+
+    res.status(200).json({ success: true, deliveredTo: successCount });
+  } catch (error) {
+    console.error('Broadcast error:', error);
+    res.status(500).json({ error: 'Database/Server error during broadcast.' });
+  }
+});
+
+// GET ROUTE FOR DASHBOARD LIVE METRICS
+app.get('/api/live-dashboard', async (req, res) => {
+  try {
+    const countRes = await pool.query('SELECT COUNT(DISTINCT user_id) as count FROM user_settings');
+    
+    const logsRes = await pool.query(`
+      SELECT id, updated_at as timestamp, status as event, username as user, user_id as chatid 
+      FROM tickets ORDER BY updated_at DESC LIMIT 15
+    `);
+    
+    const accountsRes = await pool.query(`
+      SELECT id, username as name, department as role, user_id as chatid, status 
+      FROM tickets WHERE status = 'APPROVED' ORDER BY updated_at DESC LIMIT 50
+    `);
+
+    res.json({
+      success: true,
+      metrics: {
+        totalLinked: parseInt(countRes.rows[0]?.count || 0),
+        activeToday: logsRes.rows.length, 
+        lastBroadcast: new Date().toISOString().split('T')[0]
+      },
+      logs: logsRes.rows.map(r => ({
+        id: r.id, 
+        timestamp: new Date(r.timestamp).toLocaleString('en-US', { timeZone: 'Africa/Addis_Ababa' }), 
+        event: `TICKET_${r.event}`, 
+        user: r.user ? `@${r.user}` : 'UNKNOWN', 
+        chatId: r.chatid
+      })),
+      accounts: accountsRes.rows.map(r => ({
+        id: r.id, 
+        name: r.name ? `@${r.name}` : 'UNKNOWN', 
+        role: (r.role || '').replace(' (Regular / Term)', '').replace(' (4-Year Complete)', '') || 'GENERAL', 
+        phone: 'DB_SYNCED', 
+        chatId: r.chatid, 
+        status: r.status
+      }))
+    });
+  } catch (error) {
+    console.error('Dashboard Fetch Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 function escapeHtml(str) {
@@ -658,7 +728,7 @@ async function performBroadcast(ctx, topicId, broadcastMsg) {
     return ctx.reply("⚠️ <b>ERROR:</b> Broadcast text payload cannot be empty.", { message_thread_id: topicId, parse_mode: 'HTML' });
   }
 
-  const usersRes = await pool.query('SELECT DISTINCT user_id FROM tickets');
+  const usersRes = await pool.query('SELECT DISTINCT user_id FROM user_settings');
   let successCount = 0;
   await ctx.reply(`📢 <b>INITIATING SYSTEM BROADCAST:</b> Targeting <code>${usersRes.rows.length}</code> students...`, { message_thread_id: topicId, parse_mode: 'HTML' });
 
