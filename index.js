@@ -1868,22 +1868,29 @@ app.get('/api/roster', async (req, res) => {
   }
 });
 
-app.get('/api/stats', async (req, res) => {
+app.get('/api/export', async (req, res) => {
   try {
-    const approved = await pool.query("SELECT department, COUNT(*) as count FROM tickets WHERE status = 'APPROVED' GROUP BY department");
-    const pending = await pool.query("SELECT department, COUNT(*) as count FROM tickets WHERE status = 'PENDING' GROUP BY department");
-    const rejected = await pool.query("SELECT department, COUNT(*) as count FROM tickets WHERE status = 'REJECTED' GROUP BY department");
+    const result = await pool.query(`
+      SELECT user_id, username, department, status, rejection_reason, processed_by, created_at, updated_at 
+      FROM tickets 
+      ORDER BY department ASC, status ASC, updated_at DESC
+    `);
+
+    let csv = "Student Telegram ID,Username,Department & Tag,Status,Rejection Reason,Processed By,Created At,Updated At\n";
     
-    res.json({
-      success: true,
-      stats: {
-        approved: approved.rows,
-        pending: pending.rows,
-        rejected: rejected.rows
-      }
+    result.rows.forEach((r) => {
+      const uname = r.username ? `"${r.username.replace(/"/g, '""')}"` : "";
+      const reason = r.rejection_reason ? `"${r.rejection_reason.replace(/"/g, '""')}"` : "";
+      const staff = r.processed_by ? `"${r.processed_by.replace(/"/g, '""')}"` : "";
+      csv += `${r.user_id},${uname},"${r.department}",${r.status},${reason},${staff},${r.created_at},${r.updated_at}\n`;
     });
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="Renaissance_Database_Export.csv"');
+    res.status(200).send(csv);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error("Web Export Error:", err);
+    res.status(500).json({ error: 'Failed to generate CSV export.' });
   }
 });
 
