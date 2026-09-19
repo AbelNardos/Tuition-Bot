@@ -64,7 +64,7 @@ app.post('/api/broadcast', async (req, res) => {
   }
 });
 
-// GET ROUTE FOR DASHBOARD LIVE METRICS
+// GET ROUTE FOR DASHBOARD LIVE METRICS (UPDATED FOR PHONE NUMBERS)
 app.get('/api/live-dashboard', async (req, res) => {
   try {
     const countRes = await pool.query('SELECT COUNT(DISTINCT user_id) as count FROM user_settings');
@@ -74,13 +74,14 @@ app.get('/api/live-dashboard', async (req, res) => {
       FROM tickets ORDER BY updated_at DESC LIMIT 15
     `);
     
-   const accountsRes = await pool.query(`
+    const accountsRes = await pool.query(`
       SELECT t.id, t.username as name, t.department as role, t.user_id as chatid, t.status, u.phone_number 
       FROM tickets t
       LEFT JOIN user_settings u ON t.user_id = u.user_id
       WHERE t.status = 'APPROVED' 
       ORDER BY t.updated_at DESC LIMIT 50
     `);
+
     res.json({
       success: true,
       metrics: {
@@ -95,7 +96,7 @@ app.get('/api/live-dashboard', async (req, res) => {
         user: r.user ? `@${r.user}` : 'UNKNOWN', 
         chatId: r.chatid
       })),
-     accounts: accountsRes.rows.map(r => ({
+      accounts: accountsRes.rows.map(r => ({
         id: r.id, 
         name: r.name ? `@${r.name}` : 'UNKNOWN', 
         role: (r.role || '').replace(' (Regular / Term)', '').replace(' (4-Year Complete)', '') || 'GENERAL', 
@@ -1868,6 +1869,25 @@ app.get('/api/roster', async (req, res) => {
   }
 });
 
+app.get('/api/stats', async (req, res) => {
+  try {
+    const approved = await pool.query("SELECT department, COUNT(*) as count FROM tickets WHERE status = 'APPROVED' GROUP BY department");
+    const pending = await pool.query("SELECT department, COUNT(*) as count FROM tickets WHERE status = 'PENDING' GROUP BY department");
+    const rejected = await pool.query("SELECT department, COUNT(*) as count FROM tickets WHERE status = 'REJECTED' GROUP BY department");
+    
+    res.json({
+      success: true,
+      stats: {
+        approved: approved.rows,
+        pending: pending.rows,
+        rejected: rejected.rows
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/export', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -1891,6 +1911,47 @@ app.get('/api/export', async (req, res) => {
   } catch (err) {
     console.error("Web Export Error:", err);
     res.status(500).json({ error: 'Failed to generate CSV export.' });
+  }
+});
+
+app.get('/api/certificate/:userId', async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    
+    // Fetch the specific user's approved data
+    const userRes = await pool.query(
+      `SELECT t.username, t.department, t.processed_by, u.language 
+       FROM tickets t 
+       LEFT JOIN user_settings u ON t.user_id = u.user_id 
+       WHERE t.user_id = $1 AND t.status = 'APPROVED' 
+       ORDER BY t.updated_at DESC LIMIT 1`,
+      [userId]
+    );
+
+    if (userRes.rows.length === 0) {
+      return res.status(404).send("Approved record not found.");
+    }
+
+    const { username, department, processed_by, language } = userRes.rows[0];
+    const botUsername = bot.botInfo?.username || 'Renaissance_Global_Bot';
+
+    // Run your existing PDF generation function
+    const pdfPath = await generateApprovalPDF(
+      userId,
+      username || 'N/A',
+      department,
+      processed_by || 'Finance Team',
+      botUsername,
+      language || 'en'
+    );
+
+    // Send the file to the browser, then delete the temporary file from Render
+    res.download(pdfPath, `Clearance_${userId}.pdf`, (err) => {
+      if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
+    });
+  } catch (err) {
+    console.error("PDF Generation Error:", err);
+    res.status(500).send("Error generating PDF.");
   }
 });
 
