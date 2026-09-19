@@ -1916,7 +1916,8 @@ app.get('/api/export', async (req, res) => {
 
 app.get('/api/certificate/:userId', async (req, res) => {
   try {
-    const userId = Number(req.params.userId);
+    // Keep as string to prevent 32-bit database integer overflow
+    const userId = String(req.params.userId);
     
     // Fetch the specific user's approved data
     const userRes = await pool.query(
@@ -1929,11 +1930,16 @@ app.get('/api/certificate/:userId', async (req, res) => {
     );
 
     if (userRes.rows.length === 0) {
-      return res.status(404).send("Approved record not found.");
+      return res.status(404).send("Error: Approved record not found for this user.");
     }
 
     const { username, department, processed_by, language } = userRes.rows[0];
-    const botUsername = bot.botInfo?.username || 'Renaissance_Global_Bot';
+    
+    // Safely extract bot username without optional chaining
+    let botUsername = 'Renaissance_Global_Bot';
+    if (bot && bot.botInfo && bot.botInfo.username) {
+      botUsername = bot.botInfo.username;
+    }
 
     // Run your existing PDF generation function
     const pdfPath = await generateApprovalPDF(
@@ -1947,11 +1953,13 @@ app.get('/api/certificate/:userId', async (req, res) => {
 
     // Send the file to the browser, then delete the temporary file from Render
     res.download(pdfPath, `Clearance_${userId}.pdf`, (err) => {
+      if (err) console.error("File transfer error:", err);
       if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
     });
   } catch (err) {
     console.error("PDF Generation Error:", err);
-    res.status(500).send("Error generating PDF.");
+    // Send the actual error message to the browser so we can see what's wrong if it fails
+    res.status(500).send(`Error generating PDF: ${err.message}`);
   }
 });
 
