@@ -74,11 +74,13 @@ app.get('/api/live-dashboard', async (req, res) => {
       FROM tickets ORDER BY updated_at DESC LIMIT 15
     `);
     
-    const accountsRes = await pool.query(`
-      SELECT id, username as name, department as role, user_id as chatid, status 
-      FROM tickets WHERE status = 'APPROVED' ORDER BY updated_at DESC LIMIT 50
+   const accountsRes = await pool.query(`
+      SELECT t.id, t.username as name, t.department as role, t.user_id as chatid, t.status, u.phone_number 
+      FROM tickets t
+      LEFT JOIN user_settings u ON t.user_id = u.user_id
+      WHERE t.status = 'APPROVED' 
+      ORDER BY t.updated_at DESC LIMIT 50
     `);
-
     res.json({
       success: true,
       metrics: {
@@ -93,11 +95,11 @@ app.get('/api/live-dashboard', async (req, res) => {
         user: r.user ? `@${r.user}` : 'UNKNOWN', 
         chatId: r.chatid
       })),
-      accounts: accountsRes.rows.map(r => ({
+     accounts: accountsRes.rows.map(r => ({
         id: r.id, 
         name: r.name ? `@${r.name}` : 'UNKNOWN', 
         role: (r.role || '').replace(' (Regular / Term)', '').replace(' (4-Year Complete)', '') || 'GENERAL', 
-        phone: 'DB_SYNCED', 
+        phone: r.phone_number || 'Not Provided', 
         chatId: r.chatid, 
         status: r.status
       }))
