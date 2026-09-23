@@ -45,7 +45,7 @@ function getStudentKeyboard(status, userSeason, currentSeason, lang = 'en') {
   const isAm = lang === 'am';
   let effectiveStatus = status;
   
-  if (status === 'APPROVED' && userSeason < currentSeason) effectiveStatus = null;
+  if (effectiveStatus === 'APPROVED' && userSeason < currentSeason) effectiveStatus = null;
 
   if (effectiveStatus === 'WIPED') {
       kb.text(isAm ? '📤 አዲስ ምዝገባ ጀምር' : '📤 Start New Registration', 'cmd_submit');
@@ -62,8 +62,14 @@ function getStudentKeyboard(status, userSeason, currentSeason, lang = 'en') {
   
   kb.text(isAm ? '📌 ሁኔታውን እይ' : '📌 Track Status', 'cmd_status').row();
   kb.text(isAm ? '📚 የትምህርት ሞጁሎች' : '📚 Access Vault', 'cmd_modules').row();
-  kb.text(isAm ? '📜 የክፍያ ታሪክ' : '📜 Audit History', 'cmd_history');
+  kb.text(isAm ? '📜 የክፍያ ታሪክ' : '📜 Audit History', 'cmd_history').text(isAm ? '❓ እገዛ' : '❓ Get Support', 'cmd_help');
   return kb;
 }
 
-module.exports = { STRINGS, REJECTION_REASONS, getDepartmentKeyboard, getStaffKeyboard, getStudentKeyboard };
+function getModuleDepartmentKeyboard() { return new InlineKeyboard().text("📈 MARKETING", "moddept_Marketing Management").text("💼 BUSINESS", "moddept_Business Management").row().text("📊 ACCOUNTING & FINANCE", "moddept_Accounting and finance").row().text("🌾 AGRIBUSINESS", "moddept_Agribusiness and Value chain management").row().text("📚 ED. PLANNING", "moddept_Educational planning and management").row().text("🚚 LOGISTICS", "moddept_Logistics and Supply chain management").row().text("🔙 CANCEL", "moddept_cancel"); }
+function getDeleteModuleDepartmentKeyboard() { return new InlineKeyboard().text("📈 MARKETING", "delmoddept_Marketing Management").text("💼 BUSINESS", "delmoddept_Business Management").row().text("📊 ACCOUNTING & FINANCE", "delmoddept_Accounting and finance").row().text("🌾 AGRIBUSINESS", "delmoddept_Agribusiness and Value chain management").row().text("📚 ED. PLANNING", "delmoddept_Educational planning and management").row().text("🚚 LOGISTICS", "delmoddept_Logistics and Supply chain management").row().text("🔙 CANCEL", "delmoddept_cancel"); }
+function getApprovedRosterKeyboard() { return new InlineKeyboard().text("🌐 EVERY STUDENT", "roster_all").row().text("📈 MARKETING", "roster_Marketing Management").text("💼 BUSINESS", "roster_Business Management").row().text("📊 ACCOUNTING & FINANCE", "roster_Accounting and finance").row().text("🌾 AGRIBUSINESS", "roster_Agribusiness and Value chain management").row().text("📚 ED. PLANNING", "roster_Educational planning and management").row().text("🚚 LOGISTICS", "roster_Logistics and Supply chain management").row().text("🔙 CANCEL", "roster_cancel"); }
+function getTransferKeyboard(userId, topicId) { return new InlineKeyboard().text("📈 MARKETING", `tr_${userId}_${topicId}_mkt`).text("💼 BUSINESS", `tr_${userId}_${topicId}_biz`).row().text("🌾 AGRIBUSINESS", `tr_${userId}_${topicId}_agri`).text("📚 ED. PLANNING", `tr_${userId}_${topicId}_ed`).row().text("📊 ACCOUNTING", `tr_${userId}_${topicId}_acc`).text("🚚 LOGISTICS", `tr_${userId}_${topicId}_log`).row().text("🔙 CANCEL TRANSFER", `canceltrans_${userId}_${topicId}`); }
+function getRejectionReasonKeyboard(userId, topicId) { const kb = new InlineKeyboard(); REJECTION_REASONS.forEach((r) => kb.text(r.label, `confirmrej_${userId}_${topicId}_${r.code}`).row()); return kb; }
+
+module.exports = { STRINGS, REJECTION_REASONS, getDepartmentKeyboard, getStaffKeyboard, getStudentKeyboard, getModuleDepartmentKeyboard, getDeleteModuleDepartmentKeyboard, getApprovedRosterKeyboard, getTransferKeyboard, getRejectionReasonKeyboard };

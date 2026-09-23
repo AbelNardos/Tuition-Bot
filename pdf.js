@@ -9,7 +9,7 @@ async function generateApprovalPDF(userId, username, department, staffName, botU
       const doc = new PDFDocument({ margin: 0, size: 'A4', info: { Title: `Official Tuition Clearance - ${userId}` } });
       const buffers = [];
       
-      // IN-MEMORY BUFFER: Removes disk I/O dependency
+      // IN-MEMORY BUFFER: Prevents PDFs from filling up your server hard drive
       doc.on('data', buffers.push.bind(buffers));
       doc.on('end', () => resolve(Buffer.concat(buffers)));
 
