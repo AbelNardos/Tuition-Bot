@@ -122,7 +122,7 @@ bot.command('wipestudent', async (ctx) => {
   const topicId = ctx.message.message_thread_id;
   const parts = ctx.message.text.split(' ');
   if (parts.length < 2) return ctx.reply("⚠️ <b>SYNTAX ERROR:</b> <code>/wipestudent &lt;UID&gt;</code>", { message_thread_id: topicId, parse_mode: 'HTML' });
-  const targetUid = Number(parts); // Fixed array index 1
+  const targetUid = Number(parts);
   if (isNaN(targetUid)) return ctx.reply("⚠️ <b>ERROR:</b> Invalid UID format.", { message_thread_id: topicId, parse_mode: 'HTML' });
 
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `Staff`;
@@ -169,7 +169,7 @@ bot.on('message:photo', async (ctx) => {
     if (!staffGroup) return;
     const dbTopicId = await getOrCreateDepartmentTopic(ctx, chosenDeptTagged, staffGroup);
     const forwardRes = await ctx.api.copyMessage(staffGroup, ctx.chat.id, ctx.message.message_id, { message_thread_id: dbTopicId });
-    const actionKb = new InlineKeyboard().text("✅ APPROVE", `app_${userId}_${dbTopicId}`).row().text("❌ REJECT", `rej_${userId}_${dbTopicId}`);
+    const actionKb = new InlineKeyboard().text("✅ APPROVE", `app:${userId}:${dbTopicId}`).row().text("❌ REJECT", `rej:${userId}:${dbTopicId}`);
     const sentTicketMsg = await ctx.api.sendMessage(staffGroup, `🧾 New submission from <code>${userId}</code> (${escapeHtml(chosenDeptTagged)})`, { message_thread_id: dbTopicId, parse_mode: 'HTML', reply_markup: actionKb });
     await clearPendingDepartment(userId);
     await pool.query(`INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, department, status, academic_year, academic_semester, global_season) VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10)`, [userId, ctx.from.username || 'Unknown', fileId, dbTopicId, forwardRes.message_id, sentTicketMsg.message_id, chosenDeptTagged, pRes.rows[0].pending_year || 1, pRes.rows[0].pending_semester || 1, await getGlobalTerm()]);
@@ -177,9 +177,10 @@ bot.on('message:photo', async (ctx) => {
   } finally { activeUploads.delete(userId); }
 });
 
-bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
+// --- SAFE DETERMINISTIC CALLBACK PARSING VIA .split(':') ---
+bot.callbackQuery(/^lang:(en|am)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const lang = ctx.match || ctx.match;
+  const lang = ctx.callbackQuery.data.split(':');
   await setUserLang(ctx.from.id, lang);
   await dropStudentMenu(ctx.from.id, STRINGS[lang].portalWelcome, await buildStudentMenu(ctx.from.id, lang));
 });
@@ -199,9 +200,9 @@ bot.callbackQuery('cmd_submit', async (ctx) => {
   await dropStudentMenu(ctx.from.id, STRINGS[lang].selectDept, getDepartmentKeyboard());
 });
 
-bot.callbackQuery(/^dept_(.+)$/, async (ctx) => {
+bot.callbackQuery(/^dept:(.+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const chosenDept = ctx.match || ctx.match;
+  const chosenDept = ctx.callbackQuery.data.split(':');
   await setPendingDepartment(ctx.from.id, chosenDept);
   const lang = await getUserLang(ctx.from.id);
   await dropStudentMenu(ctx.from.id, STRINGS[lang].sendReceiptPrompt.replace('{dept}', escapeHtml(chosenDept)), null);
@@ -219,9 +220,10 @@ bot.callbackQuery('cmd_download_pdf', async (ctx) => {
   } catch (e) { ctx.answerCallbackQuery("Error generating PDF."); }
 });
 
-bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
+bot.callbackQuery(/^app:(\d+):(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const userId = Number(ctx.match || ctx.match);
+  const parts = ctx.callbackQuery.data.split(':');
+  const userId = Number(parts);
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `Staff`;
   const updateRes = await pool.query("UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING department, username", [staffName, userId]);
   if (updateRes.rowCount === 0) return ctx.editMessageText("⚠️ Already finalized.");
@@ -229,6 +231,14 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   await ctx.api.sendMessage(userId, STRINGS[lang].approvedMsg).catch(()=>{});
   await dropStudentMenu(userId, STRINGS[lang].portalWelcome, await buildStudentMenu(userId, lang, 'APPROVED'));
   ctx.editMessageText("✅ Approved.");
+});
+
+bot.callbackQuery(/^rej:(\d+):(\d+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const parts = ctx.callbackQuery.data.split(':');
+  const userId = Number(parts);
+  const topicId = Number(parts);
+  await ctx.editMessageText("❌ <b>INITIALIZE REJECTION SEQUENCE:</b>", { parse_mode: 'HTML', reply_markup: getRejectionReasonKeyboard(userId, topicId) });
 });
 
 app.use('/webhook', webhookCallback(bot, 'express'));

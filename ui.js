@@ -2,7 +2,7 @@ const { InlineKeyboard } = require('grammy');
 
 const STRINGS = {
   en: {
-    portalWelcome: "🏛 <b>RENAISSANCE GLOBAL</b> | <i>Portal</i>\n━━━━━━━━━━━━━━━━━━━━\n\n<blockquote><b>Welcome to your secure academic gateway.</b>\nClear your tuition to unlock course modules and campus access.</blockquote>\n\n<b>⚡️ SYSTEM SEQUENCE:</b>\n<code></code> Select your academic department\n<code></code> Upload a pristine receipt photo\n<code></code> Obtain your official QR clearance\n\n👇 <i>Awaiting input...</i>",
+    portalWelcome: "🏛 <b>RENAISSANCE GLOBAL</b> | <i>Portal</i>\n━━━━━━━━━━━━━━━━━━━━\n\n<blockquote><b>Welcome to your secure academic gateway.</b>\nClear your tuition to unlock course modules and campus access.</blockquote>\n\n<b>⚡️ SYSTEM SEQUENCE:</b>\n Select your academic department\n Upload a pristine receipt photo\n Obtain your official QR clearance\n\n👇 <i>Awaiting input...</i>",
     selectDept: "📚 <b>ACADEMIC PLACEMENT</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>Target your designated academic department below.</blockquote>",
     receiptReceived: "✅ <b>UPLOAD SECURED</b>\nYour document is securely queued. Monitor progress via <b>Track Status</b>.",
     sendReceiptPrompt: "✅ <b>TARGET:</b> <code>{dept}</code>\n━━━━━━━━━━━━━━━━━━━━\n\n📸 <b>AWAITING MEDIA:</b> Transmit your receipt photo now.\n\n<blockquote><i>Note: Low-resolution or cropped images will be auto-rejected by the review team.</i></blockquote>",
@@ -12,7 +12,7 @@ const STRINGS = {
     helpText: "❓ <b>SUPPORT DIRECTORY</b>\n\n<blockquote>For technical faults or payment discrepancies, report directly to the central Registrar Office.</blockquote>"
   },
   am: {
-    portalWelcome: "🏛 <b>ሬነሳንስ ግሎባል</b> | <i>የተማሪ ፖርታል</i>\n━━━━━━━━━━━━━━━━━━━━\n\n<blockquote><b>እንኳን ወደ ተማሪዎች ማዕከል በሰላም መጡ።</b>\nሞጁሎችን ለማውረድ የክፍያዎን ሂደት ያጠናቅቁ።</blockquote>\n\n<b>⚡️ ዋና እርምጃዎች:</b>\n<code></code> የትምህርት ክፍልዎን ይምረጡ\n<code></code> ግልጽ የሆነ ደረሰኝ ፎቶ ይላኩ\n<code></code> ይፋዊ ማረጋገጫ (QR) ይቀበሉ\n\n👇 <i>ለመጀመር ከታች ይምረጡ፡</i>",
+    portalWelcome: "🏛 <b>ሬነሳንስ ግሎባል</b> | <i>የተማሪ ፖርታል</i>\n━━━━━━━━━━━━━━━━━━━━\n\n<blockquote><b>እንኳን ወደ ተማሪዎች ማዕከል በሰላም መጡ።</b>\nሞጁሎችን ለማውረድ የክፍያዎን ሂደት ያጠናቅቁ።</blockquote>\n\n<b>⚡️ ዋና እርምጃዎች:</b>\n የትምህርት ክፍልዎን ይምረጡ\n ግልጽ የሆነ ደረሰኝ ፎቶ ይላኩ\n ይፋዊ ማረጋገጫ (QR) ይቀበሉ\n\n👇 <i>ለመጀመር ከታች ይምረጡ፡</i>",
     selectDept: "📚 <b>የትምህርት ክፍል</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>እባክዎን ትምህርት ክፍልዎን ይምረጡ፡</blockquote>",
     receiptReceived: "✅ <b>ማመልከቻዎ ገብቷል</b>\nየላኩት ደረሰኝ ተመዝግቧል። 'ሁኔታውን እይ' በመጫን መከታተል ይችላሉ።",
     sendReceiptPrompt: "✅ <b>የተመረጠው ክፍል፡</b> <code>{dept}</code>\n━━━━━━━━━━━━━━━━━━━━\n\n📸 <b>ቀጣይ እርምጃ፡</b> የክፍያ ደረሰኝ ፎቶዎን አሁን ይላኩ።\n\n<blockquote><i>ማሳሰቢያ፡ ብዥ ያለ ወይም የተቆረጠ ፎቶ ተቀባይነት የለውም።</i></blockquote>",
@@ -32,11 +32,11 @@ const REJECTION_REASONS = [
 
 function getDepartmentKeyboard() {
   return new InlineKeyboard()
-    .text("📈 MARKETING", "dept_Marketing Management").text("💼 BUSINESS", "dept_Business Management").row()
-    .text("📊 ACCOUNTING & FINANCE", "dept_Accounting and finance").row()
-    .text("🌾 AGRIBUSINESS & VCM", "dept_Agribusiness and Value chain management").row()
-    .text("📚 ED. PLANNING & MGMT", "dept_Educational planning and management").row()
-    .text("🚚 LOGISTICS & SCM", "dept_Logistics and Supply chain management");
+    .text("📈 MARKETING", "dept:Marketing Management").text("💼 BUSINESS", "dept:Business Management").row()
+    .text("📊 ACCOUNTING & FINANCE", "dept:Accounting and finance").row()
+    .text("🌾 AGRIBUSINESS & VCM", "dept:Agribusiness and Value chain management").row()
+    .text("📚 ED. PLANNING & MGMT", "dept:Educational planning and management").row()
+    .text("🚚 LOGISTICS & SCM", "dept:Logistics and Supply chain management");
 }
 
 function getStaffKeyboard() {
@@ -78,10 +78,10 @@ function getStudentKeyboard(status, userSeason, currentSeason, lang = 'en') {
   return kb;
 }
 
-function getModuleDepartmentKeyboard() { return new InlineKeyboard().text("📈 MARKETING", "moddept_Marketing Management").text("💼 BUSINESS", "moddept_Business Management").row().text("📊 ACCOUNTING & FINANCE", "moddept_Accounting and finance").row().text("🌾 AGRIBUSINESS & VCM", "moddept_Agribusiness and Value chain management").row().text("📚 ED. PLANNING & MGMT", "moddept_Educational planning and management").row().text("🚚 LOGISTICS & SCM", "moddept_Logistics and Supply chain management").row().text("🔙 CANCEL", "moddept_cancel"); }
-function getDeleteModuleDepartmentKeyboard() { return new InlineKeyboard().text("📈 MARKETING", "delmoddept_Marketing Management").text("💼 BUSINESS", "delmoddept_Business Management").row().text("📊 ACCOUNTING & FINANCE", "delmoddept_Accounting and finance").row().text("🌾 AGRIBUSINESS & VCM", "delmoddept_Agribusiness and Value chain management").row().text("📚 ED. PLANNING & MGMT", "delmoddept_Educational planning and management").row().text("🚚 LOGISTICS & SCM", "delmoddept_Logistics and Supply chain management").row().text("🔙 CANCEL", "delmoddept_cancel"); }
-function getApprovedRosterKeyboard() { return new InlineKeyboard().text("🌐 EVERY STUDENT (ALL DEPTS)", "roster_all").row().text("📈 MARKETING", "roster_Marketing Management").text("💼 BUSINESS", "roster_Business Management").row().text("📊 ACCOUNTING & FINANCE", "roster_Accounting and finance").row().text("🌾 AGRIBUSINESS & VCM", "roster_Agribusiness and Value chain management").row().text("📚 ED. PLANNING", "roster_Educational planning and management").row().text("🚚 LOGISTICS & SCM", "roster_Logistics and Supply chain management").row().text("🔙 CANCEL", "roster_cancel"); }
-function getTransferKeyboard(userId, topicId) { return new InlineKeyboard().text("📈 MARKETING", `tr_${userId}_${topicId}_mkt`).text("💼 BUSINESS", `tr_${userId}_${topicId}_biz`).row().text("🌾 AGRIBUSINESS", `tr_${userId}_${topicId}_agri`).text("📚 ED. PLANNING", `tr_${userId}_${topicId}_ed`).row().text("📊 ACCOUNTING", `tr_${userId}_${topicId}_acc`).text("🚚 LOGISTICS", `tr_${userId}_${topicId}_log`).row().text("🔙 CANCEL TRANSFER", `canceltrans_${userId}_${topicId}`); }
-function getRejectionReasonKeyboard(userId, topicId) { const kb = new InlineKeyboard(); REJECTION_REASONS.forEach((r) => kb.text(r.label, `confirmrej_${userId}_${topicId}_${r.code}`).row()); return kb; }
+function getModuleDepartmentKeyboard() { return new InlineKeyboard().text("📈 MARKETING", "moddept:Marketing Management").text("💼 BUSINESS", "moddept:Business Management").row().text("📊 ACCOUNTING & FINANCE", "moddept:Accounting and finance").row().text("🌾 AGRIBUSINESS & VCM", "moddept:Agribusiness and Value chain management").row().text("📚 ED. PLANNING & MGMT", "moddept:Educational planning and management").row().text("🚚 LOGISTICS & SCM", "moddept:Logistics and Supply chain management").row().text("🔙 CANCEL", "moddept_cancel"); }
+function getDeleteModuleDepartmentKeyboard() { return new InlineKeyboard().text("📈 MARKETING", "delmoddept:Marketing Management").text("💼 BUSINESS", "delmoddept:Business Management").row().text("📊 ACCOUNTING & FINANCE", "delmoddept:Accounting and finance").row().text("🌾 AGRIBUSINESS & VCM", "delmoddept:Agribusiness and Value chain management").row().text("📚 ED. PLANNING & MGMT", "delmoddept:Educational planning and management").row().text("🚚 LOGISTICS & SCM", "delmoddept:Logistics and Supply chain management").row().text("🔙 CANCEL", "delmoddept_cancel"); }
+function getApprovedRosterKeyboard() { return new InlineKeyboard().text("🌐 EVERY STUDENT (ALL DEPTS)", "roster:all").row().text("📈 MARKETING", "roster:Marketing Management").text("💼 BUSINESS", "roster:Business Management").row().text("📊 ACCOUNTING & FINANCE", "roster:Accounting and finance").row().text("🌾 AGRIBUSINESS & VCM", "roster:Agribusiness and Value chain management").row().text("📚 ED. PLANNING", "roster:Educational planning and management").row().text("🚚 LOGISTICS & SCM", "roster:Logistics and Supply chain management").row().text("🔙 CANCEL", "roster:cancel"); }
+function getTransferKeyboard(userId, topicId) { return new InlineKeyboard().text("📈 MARKETING", `tr:${userId}:${topicId}:mkt`).text("💼 BUSINESS", `tr:${userId}:${topicId}:biz`).row().text("🌾 AGRIBUSINESS", `tr:${userId}:${topicId}:agri`).text("📚 ED. PLANNING", `tr:${userId}:${topicId}:ed`).row().text("📊 ACCOUNTING", `tr:${userId}:${topicId}:acc`).text("🚚 LOGISTICS", `tr:${userId}:${topicId}:log`).row().text("🔙 CANCEL TRANSFER", `canceltrans:${userId}:${topicId}`); }
+function getRejectionReasonKeyboard(userId, topicId) { const kb = new InlineKeyboard(); REJECTION_REASONS.forEach((r) => kb.text(r.label, `confirmrej:${userId}:${topicId}:${r.code}`).row()); return kb; }
 
 module.exports = { STRINGS, REJECTION_REASONS, getDepartmentKeyboard, getStaffKeyboard, getStudentKeyboard, getModuleDepartmentKeyboard, getDeleteModuleDepartmentKeyboard, getApprovedRosterKeyboard, getTransferKeyboard, getRejectionReasonKeyboard };

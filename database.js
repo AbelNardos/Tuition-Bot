@@ -64,7 +64,11 @@ async function getPendingDepartment(userId) {
 }
 
 async function setPendingDepartment(userId, dept) {
-  try { await pool.query(`INSERT INTO user_settings (user_id, pending_department) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET pending_department = $2`, [userId, dept]); } catch (err) {}
+  try {
+    await pool.query(`INSERT INTO user_settings (user_id, pending_department) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET pending_department = $2`, [userId, dept]);
+  } catch (err) {
+    console.error('[setPendingDepartment Error]:', err.message);
+  }
 }
 
 async function clearPendingDepartment(userId) {
