@@ -2,20 +2,24 @@ const { InlineKeyboard } = require('grammy');
 
 const STRINGS = {
   en: {
-    portalWelcome: "🏛 <b>RENAISSANCE GLOBAL</b> | <i>Portal</i>\n━━━━━━━━━━━━━━━━━━━━\n\n<blockquote><b>Welcome to your secure academic gateway.</b>\nClear your tuition to unlock course modules and campus access.</blockquote>\n\n<b>⚡️ SYSTEM SEQUENCE:</b>\n<code>[1]</code> Select your academic department\n<code>[2]</code> Upload a pristine receipt photo\n<code>[3]</code> Obtain your official QR clearance\n\n👇 <i>Awaiting input...</i>",
+    portalWelcome: "🏛 <b>RENAISSANCE GLOBAL</b> | <i>Portal</i>\n━━━━━━━━━━━━━━━━━━━━\n\n<blockquote><b>Welcome to your secure academic gateway.</b>\nClear your tuition to unlock course modules and campus access.</blockquote>\n\n<b>⚡️ SYSTEM SEQUENCE:</b>\n<code></code> Select your academic department\n<code></code> Upload a pristine receipt photo\n<code></code> Obtain your official QR clearance\n\n👇 <i>Awaiting input...</i>",
     selectDept: "📚 <b>ACADEMIC PLACEMENT</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>Target your designated academic department below.</blockquote>",
     receiptReceived: "✅ <b>UPLOAD SECURED</b>\nYour document is securely queued. Monitor progress via <b>Track Status</b>.",
     sendReceiptPrompt: "✅ <b>TARGET:</b> <code>{dept}</code>\n━━━━━━━━━━━━━━━━━━━━\n\n📸 <b>AWAITING MEDIA:</b> Transmit your receipt photo now.\n\n<blockquote><i>Note: Low-resolution or cropped images will be auto-rejected by the review team.</i></blockquote>",
     approvedMsg: "✅ <b>SYSTEM CLEARANCE APPROVED</b>\nYour tuition transaction has been verified by the Finance Office.",
-    rejectedMsg: "❌ <b>CLEARANCE DENIED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote><b>ERROR REASON:</b> {reason}</blockquote>\n\n{message}"
+    rejectedMsg: "❌ <b>CLEARANCE DENIED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote><b>ERROR REASON:</b> {reason}</blockquote>\n\n{message}",
+    pendingExists: "⚠️ <b>LOCKOUT: ACTIVE SUBMISSION</b>\n\nYou have a document currently under active staff review. Await resolution.",
+    helpText: "❓ <b>SUPPORT DIRECTORY</b>\n\n<blockquote>For technical faults or payment discrepancies, report directly to the central Registrar Office.</blockquote>"
   },
   am: {
-    portalWelcome: "🏛 <b>ሬነሳንስ ግሎባል</b> | <i>የተማሪ ፖርታል</i>\n━━━━━━━━━━━━━━━━━━━━\n\n<blockquote><b>እንኳን ወደ ተማሪዎች ማዕከል በሰላም መጡ።</b>\nሞጁሎችን ለማውረድ የክፍያዎን ሂደት ያጠናቅቁ።</blockquote>\n\n<b>⚡️ ዋና እርምጃዎች:</b>\n<code>[1]</code> የትምህርት ክፍልዎን ይምረጡ\n<code>[2]</code> ግልጽ የሆነ ደረሰኝ ፎቶ ይላኩ\n<code>[3]</code> ይፋዊ ማረጋገጫ (QR) ይቀበሉ\n\n👇 <i>ለመጀመር ከታች ይምረጡ፡</i>",
+    portalWelcome: "🏛 <b>ሬነሳንስ ግሎባል</b> | <i>የተማሪ ፖርታል</i>\n━━━━━━━━━━━━━━━━━━━━\n\n<blockquote><b>እንኳን ወደ ተማሪዎች ማዕከል በሰላም መጡ።</b>\nሞጁሎችን ለማውረድ የክፍያዎን ሂደት ያጠናቅቁ።</blockquote>\n\n<b>⚡️ ዋና እርምጃዎች:</b>\n<code></code> የትምህርት ክፍልዎን ይምረጡ\n<code></code> ግልጽ የሆነ ደረሰኝ ፎቶ ይላኩ\n<code></code> ይፋዊ ማረጋገጫ (QR) ይቀበሉ\n\n👇 <i>ለመጀመር ከታች ይምረጡ፡</i>",
     selectDept: "📚 <b>የትምህርት ክፍል</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>እባክዎን ትምህርት ክፍልዎን ይምረጡ፡</blockquote>",
     receiptReceived: "✅ <b>ማመልከቻዎ ገብቷል</b>\nየላኩት ደረሰኝ ተመዝግቧል። 'ሁኔታውን እይ' በመጫን መከታተል ይችላሉ።",
     sendReceiptPrompt: "✅ <b>የተመረጠው ክፍል፡</b> <code>{dept}</code>\n━━━━━━━━━━━━━━━━━━━━\n\n📸 <b>ቀጣይ እርምጃ፡</b> የክፍያ ደረሰኝ ፎቶዎን አሁን ይላኩ።\n\n<blockquote><i>ማሳሰቢያ፡ ብዥ ያለ ወይም የተቆረጠ ፎቶ ተቀባይነት የለውም።</i></blockquote>",
     approvedMsg: "✅ <b>ማረጋገጫዎ ጸድቋል</b>\nየክፍያ ማረጋገጫዎ በፋይናንስ ቢሮ ተቀባይነት አግኝቷል።",
-    rejectedMsg: "❌ <b>ማመልከቻዎ ውድቅ ተደርጓል</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote><b>ምክንያት:</b> {reason}</blockquote>\n\n{message}"
+    rejectedMsg: "❌ <b>ማመልከቻዎ ውድቅ ተደርጓል</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote><b>ምክንያት:</b> {reason}</blockquote>\n\n{message}",
+    pendingExists: "⚠️ <b>በሂደት ላይ ያለ ማመልከቻ አለ</b>\n\nቀደም ሲል የላኩት ደረሰኝ በግምገማ ላይ ነው። መታየት እስኪያልቅ ይጠብቁ።",
+    helpText: "❓ <b>የድጋፍ ማዕከል</b>\n\n<blockquote>በክፍያ ወይም በምዝገባ ላይ ችግር ካለዎት፣ እባክዎን የሬጅስትራር ቢሮውን ያነጋግሩ።</blockquote>"
   }
 };
 
