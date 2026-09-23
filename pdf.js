@@ -9,7 +9,6 @@ async function generateApprovalPDF(userId, username, department, staffName, botU
       const doc = new PDFDocument({ margin: 0, size: 'A4', info: { Title: `Official Tuition Clearance - ${userId}` } });
       const buffers = [];
       
-      // IN-MEMORY BUFFER: Prevents PDFs from filling up your server hard drive
       doc.on('data', buffers.push.bind(buffers));
       doc.on('end', () => resolve(Buffer.concat(buffers)));
 
@@ -56,7 +55,7 @@ async function generateApprovalPDF(userId, username, department, staffName, botU
       const authX = 80; doc.font('Helvetica-Bold').fontSize(11).fillColor('#334155').text('VERIFICATION DETAILS', authX, currentY);
       doc.font('Helvetica').fontSize(10).fillColor('#475569');
       doc.text(`Authorized By: ${String(staffName).replace(/[^\x00-\x7F]/g, '').trim() || 'System Admin'}`, authX, currentY + 20); 
-      doc.text(`Timestamp: ${new Date().toLocaleString()}`, authX, currentY + 38);
+      doc.text(`Timestamp: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Addis_Ababa' })}`, authX, currentY + 38);
 
       const qrData = botUsername ? `https://t.me/${botUsername}?start=verify_${userId}` : `RENAISSANCE_GLOBAL_VERIFY:${userId}`;
       const qrBuffer = await QRCode.toBuffer(qrData, { width: 110, margin: 1, color: { dark: '#0a192f', light: '#ffffff' } });

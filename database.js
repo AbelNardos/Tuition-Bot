@@ -6,7 +6,7 @@ const pool = new Pool({
 });
 
 pool.on('error', (err, client) => {
-  console.error('[PostgreSQL Idle Error]:', err.message);
+  console.error('Unexpected error on idle PostgreSQL client', err);
   process.exit(-1); 
 });
 
