@@ -1,0 +1,69 @@
+const { InlineKeyboard } = require('grammy');
+
+const STRINGS = {
+  en: {
+    portalWelcome: "🏛 <b>RENAISSANCE GLOBAL</b> | <i>Portal</i>\n━━━━━━━━━━━━━━━━━━━━\n\n<blockquote><b>Welcome to your secure academic gateway.</b>\nClear your tuition to unlock course modules and campus access.</blockquote>\n\n<b>⚡️ SYSTEM SEQUENCE:</b>\n<code>[1]</code> Select your academic department\n<code>[2]</code> Upload a pristine receipt photo\n<code>[3]</code> Obtain your official QR clearance\n\n👇 <i>Awaiting input...</i>",
+    selectDept: "📚 <b>ACADEMIC PLACEMENT</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>Target your designated academic department below.</blockquote>",
+    receiptReceived: "✅ <b>UPLOAD SECURED</b>\nYour document is securely queued. Monitor progress via <b>Track Status</b>.",
+    sendReceiptPrompt: "✅ <b>TARGET:</b> <code>{dept}</code>\n━━━━━━━━━━━━━━━━━━━━\n\n📸 <b>AWAITING MEDIA:</b> Transmit your receipt photo now.\n\n<blockquote><i>Note: Low-resolution or cropped images will be auto-rejected by the review team.</i></blockquote>",
+    approvedMsg: "✅ <b>SYSTEM CLEARANCE APPROVED</b>\nYour tuition transaction has been verified by the Finance Office.",
+    rejectedMsg: "❌ <b>CLEARANCE DENIED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote><b>ERROR REASON:</b> {reason}</blockquote>\n\n{message}"
+  },
+  am: {
+    portalWelcome: "🏛 <b>ሬነሳንስ ግሎባል</b> | <i>የተማሪ ፖርታል</i>\n━━━━━━━━━━━━━━━━━━━━\n\n<blockquote><b>እንኳን ወደ ተማሪዎች ማዕከል በሰላም መጡ።</b>\nሞጁሎችን ለማውረድ የክፍያዎን ሂደት ያጠናቅቁ።</blockquote>\n\n<b>⚡️ ዋና እርምጃዎች:</b>\n<code>[1]</code> የትምህርት ክፍልዎን ይምረጡ\n<code>[2]</code> ግልጽ የሆነ ደረሰኝ ፎቶ ይላኩ\n<code>[3]</code> ይፋዊ ማረጋገጫ (QR) ይቀበሉ\n\n👇 <i>ለመጀመር ከታች ይምረጡ፡</i>",
+    selectDept: "📚 <b>የትምህርት ክፍል</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>እባክዎን ትምህርት ክፍልዎን ይምረጡ፡</blockquote>",
+    receiptReceived: "✅ <b>ማመልከቻዎ ገብቷል</b>\nየላኩት ደረሰኝ ተመዝግቧል። 'ሁኔታውን እይ' በመጫን መከታተል ይችላሉ።",
+    sendReceiptPrompt: "✅ <b>የተመረጠው ክፍል፡</b> <code>{dept}</code>\n━━━━━━━━━━━━━━━━━━━━\n\n📸 <b>ቀጣይ እርምጃ፡</b> የክፍያ ደረሰኝ ፎቶዎን አሁን ይላኩ።\n\n<blockquote><i>ማሳሰቢያ፡ ብዥ ያለ ወይም የተቆረጠ ፎቶ ተቀባይነት የለውም።</i></blockquote>",
+    approvedMsg: "✅ <b>ማረጋገጫዎ ጸድቋል</b>\nየክፍያ ማረጋገጫዎ በፋይናንስ ቢሮ ተቀባይነት አግኝቷል።",
+    rejectedMsg: "❌ <b>ማመልከቻዎ ውድቅ ተደርጓል</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote><b>ምክንያት:</b> {reason}</blockquote>\n\n{message}"
+  }
+};
+
+const REJECTION_REASONS = [
+  { label: "📷 BLURRY MEDIA", code: "blurry", message_en: "Please ensure your receipt image is clear, fully visible, and uncropped.", message_am: "እባክዎን የደረሰኝዎ ፎቶ ግልጽ መሆኑን አረጋግተው እንደገና ይላኩ።" },
+  { label: "💵 AMOUNT MISMATCH", code: "amount", message_en: "The payment amount does not match your required tuition fees.", message_am: "የተከፈለው የገንዘብ መጠን ከተፈለገው የትምህርት ክፍያ ጋር አይመሳሰልም።" },
+  { label: "🚫 INVALID RECEIPT", code: "invalid", message_en: "This receipt could not be verified by our finance team.", message_am: "ይህ ደረሰኝ ሊረጋገጥ አልቻለም።" },
+  { label: "👤 CREDENTIAL MISMATCH", code: "mismatch", message_en: "The name or Student ID on the receipt does not match your profile.", message_am: "በደረሰኙ ላይ ያለው ስም ከተመዘገበው መረጃ ጋር አይመሳሰልም።" }
+];
+
+function getDepartmentKeyboard() {
+  return new InlineKeyboard().text("📈 MARKETING", "dept_Marketing Management").text("💼 BUSINESS", "dept_Business Management").row()
+    .text("📊 ACCOUNTING & FINANCE", "dept_Accounting and finance").row().text("🌾 AGRIBUSINESS", "dept_Agribusiness and Value chain management").row()
+    .text("📚 ED. PLANNING", "dept_Educational planning and management").row().text("🚚 LOGISTICS", "dept_Logistics and Supply chain management");
+}
+
+function getStaffKeyboard() {
+  return new InlineKeyboard().text('🟢 APPROVED DIRECTORY', 'cmd_approved_roster').text('🔍 SEARCH ID', 'cmd_lookfor').row()
+    .text('📂 UPLOAD MODULE', 'cmd_upload_module').text('🗑 MANAGE VAULT', 'cmd_delete_module').row()
+    .text('🔄 OVERRIDE DEPT', 'cmd_panel_changedept').text('⚠️ REVOKE STATUS', 'cmd_panel_revoke').row()
+    .text('📊 LIVE ANALYTICS', 'cmd_stats').text('📈 VAULT STATS', 'cmd_mod_analytics').row()
+    .text('📥 EXPORT DATABASE', 'cmd_export').row().text('🔓 OPEN NEW REGISTRATION', 'cmd_advance_term').row().text('📢 BROADCAST SYSTEM ALERT', 'cmd_broadcast');
+}
+
+function getStudentKeyboard(status, userSeason, currentSeason, lang = 'en') {
+  const kb = new InlineKeyboard();
+  const isAm = lang === 'am';
+  let effectiveStatus = status;
+  
+  if (status === 'APPROVED' && userSeason < currentSeason) effectiveStatus = null;
+
+  if (effectiveStatus === 'WIPED') {
+      kb.text(isAm ? '📤 አዲስ ምዝገባ ጀምር' : '📤 Start New Registration', 'cmd_submit');
+      return kb;
+  }
+  if (effectiveStatus === 'PENDING') {
+      kb.text(isAm ? '⏳ በግምገማ ላይ...' : '⏳ Review In Progress...', 'cmd_pending_info').row();
+      kb.text(isAm ? '🛑 ማመልከቻ ሰርዝ' : '🛑 Cancel Pending Submission', 'cmd_cancel_pending');
+  } else if (effectiveStatus === 'APPROVED') {
+      kb.text(isAm ? '⬇️ የይለፍ ማረጋገጫ' : '⬇️ Download Clearance', 'cmd_download_pdf').row();
+  } else {
+      kb.text(isAm ? '📤 ደረሰኝ አስገባ' : '📤 Transmit Receipt', 'cmd_submit');
+  }
+  
+  kb.text(isAm ? '📌 ሁኔታውን እይ' : '📌 Track Status', 'cmd_status').row();
+  kb.text(isAm ? '📚 የትምህርት ሞጁሎች' : '📚 Access Vault', 'cmd_modules').row();
+  kb.text(isAm ? '📜 የክፍያ ታሪክ' : '📜 Audit History', 'cmd_history');
+  return kb;
+}
+
+module.exports = { STRINGS, REJECTION_REASONS, getDepartmentKeyboard, getStaffKeyboard, getStudentKeyboard };
