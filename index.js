@@ -372,6 +372,96 @@ bot.on('message:photo', async (ctx) => {
   }
 });
 
+// --- MISSING STAFF GROUP UPLOADS & TEXT REPLIES ---
+bot.on('message:document', async (ctx) => {
+  const staffGroupId = await getActiveStaffGroupId();
+  if (!staffGroupId || String(ctx.chat.id) !== staffGroupId) return;
+
+  let staffDept = await getStaffPendingModuleDept(ctx.from.id);
+  
+  // Fallback: Check if they replied to the "TARGET LOCKED" message directly
+  if (!staffDept && ctx.message.reply_to_message?.text) {
+    const match = ctx.message.reply_to_message.text.match(/TARGET LOCKED:\s*([^\n]+)/);
+    if (match) staffDept = match[1].trim();
+  }
+
+  if (staffDept) {
+    const doc = ctx.message.document;
+    const moduleTitle = doc.file_name ? doc.file_name.replace(/\.pdf$/i, '') : 'Course Module';
+    const topicId = ctx.message.message_thread_id;
+    
+    try {
+      const vaultTopicId = await getOrCreateModulesVaultTopic(ctx, staffGroupId);
+      const vaultMsg = await ctx.api.sendDocument(staffGroupId, doc.file_id, { message_thread_id: vaultTopicId, caption: `📚 <b>VAULT ARCHIVE INDEX</b>\n<blockquote>• <b>Department:</b> ${escapeHtml(staffDept)}\n• <b>Designation:</b> ${escapeHtml(moduleTitle)}</blockquote>`, parse_mode: 'HTML' });
+      const insRes = await pool.query("INSERT INTO department_modules (department, title, file_id, file_name) VALUES ($1, $2, $3, $4) RETURNING id", [staffDept, moduleTitle, vaultMsg.document.file_id, doc.file_name || `${moduleTitle}.pdf`]);
+      
+      try { await ctx.deleteMessage(); } catch (e) {}
+      await clearStaffPendingModuleDept(ctx.from.id);
+      
+      const notifyKb = new InlineKeyboard().text("📢 INITIATE NETWORK BROADCAST", `notify_mod_${insRes.rows[0].id}`).row().text("🔕 STEALTH INGEST", "dismiss_mod_notify");
+      return ctx.reply(`✅ <b>DOCUMENT SECURELY INGESTED INTO VAULT</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote><b>TARGET SECTOR:</b> ${escapeHtml(staffDept)}\n<b>FILE DESIGNATION:</b> ${escapeHtml(moduleTitle)}</blockquote>\n\n<i>System ready. Do you wish to initiate a network broadcast to alert enrolled students?</i>`, { message_thread_id: topicId, parse_mode: 'HTML', reply_markup: notifyKb });
+    } catch (err) {
+      ctx.reply(`❌ <b>INGEST ERROR:</b> ${err.message}`, { parse_mode: 'HTML' });
+    }
+  }
+});
+
+bot.on('message:text', async (ctx, next) => {
+  if (ctx.message.text.startsWith('/')) return next();
+  const staffGroupId = await getActiveStaffGroupId();
+  if (!staffGroupId || String(ctx.chat.id) !== staffGroupId) return next();
+  if (!ctx.message.reply_to_message || !ctx.message.reply_to_message.text) return next();
+
+  const orig = ctx.message.reply_to_message.text;
+  const input = ctx.message.text.trim();
+  const topicId = ctx.message.message_thread_id;
+
+  if (orig.includes("DATABASE RECORD QUERY")) {
+    const cleanQuery = input.replace(/^@/, '');
+    const res = await pool.query(`SELECT user_id, username, department, status, updated_at FROM tickets WHERE user_id::text = $1 OR LOWER(username) = LOWER($1) OR LOWER(department) LIKE LOWER($2) ORDER BY updated_at DESC LIMIT 10`, [cleanQuery, `%${cleanQuery}%`]);
+    if (res.rows.length === 0) return ctx.reply(`🔍 <b>No records matching:</b> <code>${escapeHtml(input)}</code>`, { message_thread_id: topicId, parse_mode: 'HTML' });
+    let text = `🔍 <b>QUERY RESULTS:</b>\n━━━━━━━━━━━━━━━━━━━━\n`;
+    res.rows.forEach(r => { text += `• <b>UID:</b> <code>${r.user_id}</code> (@${r.username || 'Unknown'})\n  <b>Sector:</b> ${escapeHtml(r.department)}\n  <b>Status:</b> ${r.status}\n\n`; });
+    return ctx.reply(text, { message_thread_id: topicId, parse_mode: 'HTML' });
+  }
+
+  if (orig.includes("INITIALIZE SYSTEM BROADCAST")) {
+    const usersRes = await pool.query('SELECT DISTINCT user_id FROM user_settings');
+    let count = 0;
+    for (const row of usersRes.rows) {
+      try { await bot.api.sendMessage(row.user_id, `📢 <b>SYSTEM ALERT</b>\n━━━━━━━━━━━━━━━━━━━━\n\n${escapeHtml(input)}`, { parse_mode: 'HTML' }); count++; } catch (e) {}
+    }
+    return ctx.reply(`✅ <b>BROADCAST SUCCESSFUL:</b> Delivered to <code>${count}</code> active nodes.`, { message_thread_id: topicId, parse_mode: 'HTML' });
+  }
+
+  if (orig.includes("INITIATE DEPARTMENT OVERRIDE")) {
+    const targetUid = Number(input);
+    if (isNaN(targetUid)) return ctx.reply("⚠️ <b>ERROR:</b> Invalid UID format.", { message_thread_id: topicId, parse_mode: 'HTML' });
+    const kb = new InlineKeyboard().text("📈 MARKETING", `chgdept_${targetUid}_mkt`).text("💼 BUSINESS", `chgdept_${targetUid}_biz`).row().text("📊 ACCOUNTING", `chgdept_${targetUid}_acc`).text("🌾 AGRIBUSINESS", `chgdept_${targetUid}_agri`).row().text("📚 ED. PLANNING", `chgdept_${targetUid}_ed`).text("🚚 LOGISTICS", `chgdept_${targetUid}_log`).row().text("🔙 CANCEL", `chgdept_${targetUid}_cancel`);
+    return ctx.reply(`📂 <b>SELECT NEW ROUTING FOR UID <code>${targetUid}</code>:</b>`, { message_thread_id: topicId, parse_mode: 'HTML', reply_markup: kb });
+  }
+
+  if (orig.includes("INITIATE STATUS REVOCATION")) {
+    const targetUid = Number(input);
+    if (isNaN(targetUid)) return ctx.reply("⚠️ <b>ERROR:</b> Invalid UID format.", { message_thread_id: topicId, parse_mode: 'HTML' });
+    const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `Staff`;
+    const updateRes = await pool.query(`UPDATE tickets SET status = 'REJECTED', rejection_reason = 'Revoked by Admin', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'APPROVED' RETURNING department, username`, [staffName, targetUid]);
+    if (updateRes.rowCount === 0) return ctx.reply("⚠️ <b>ERROR:</b> Target record no longer active/approved.", { message_thread_id: topicId, parse_mode: 'HTML' });
+    
+    pushToGoogleSheet(targetUid, updateRes.rows[0].username, updateRes.rows[0].department, 'REJECTED', staffName, 'Revoked by Admin');
+    
+    try {
+      const { lang } = await getUserState(targetUid);
+      const rejectText = STRINGS[lang].rejectedMsg.replace('{reason}', "Revoked by Admin").replace('{message}', "Your clearance has been manually revoked. Please contact administration.");
+      await bot.api.sendMessage(targetUid, `🔔 <b>STATUS UPDATE:</b>\n\n${rejectText}`, { parse_mode: 'HTML' });
+      await dropMenu(targetUid, STRINGS[lang].portalWelcome, await buildStudentMenu(targetUid, lang, 'REJECTED'));
+    } catch (e) {}
+
+    return ctx.reply(`✅ <b>STATUS REVOKED</b>\nUID <code>${targetUid}</code> locked out.`, { message_thread_id: topicId, parse_mode: 'HTML' });
+  }
+  return next();
+});
+
 // ============================================================================
 // STUDENT TRANSFORM CALLBACK QUERIES
 // ============================================================================
