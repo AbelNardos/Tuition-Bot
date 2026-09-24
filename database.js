@@ -107,7 +107,7 @@ async function clearStaffPendingModuleDept(userId) {
 }
 
 async function getOrCreateDepartmentTopic(ctx, departmentName, targetGroupId) {
-  const baseDept = departmentName.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
+  const baseDept = departmentName.replace(/\s*\((Regular \/ Term\vert{}4-Year Complete)\)$/, '').trim();
   const cached = await pool.query('SELECT topic_id FROM department_topics WHERE group_id = $1 AND department = $2 LIMIT 1', [targetGroupId, baseDept]);
   if (cached.rows.length > 0) return Number(cached.rows[0].topic_id);
   
@@ -134,17 +134,17 @@ function escapeHtml(str) {
 
 function formatDeptForDashboard(dept) {
   if (!dept) return 'Unassigned';
-  let cleaned = String(dept).replace(/\s*\((Regular \/ Term|4-Year Complete)\)/ig, '').trim();
+  let cleaned = String(dept).replace(/\s*\((Regular \/ Term\vert{}4-Year Complete)\)/ig, '').trim();
   return cleaned || 'Unassigned';
 }
 
 async function generateSummaryText(statusType) {
   const res = await pool.query(`SELECT department, COUNT(*) as count FROM tickets WHERE status = $1 GROUP BY department ORDER BY department ASC`, [statusType]);
-  const icon = statusType === 'APPROVED' ? '✅' : '❌';
-  let text = `📊 <b>${icon} ${statusType} RECEIPTS DIRECTORY</b>\n━━━━━━━━━━━━━━━━━━━━\n`;
-  if (res.rows.length === 0) return text + `<blockquote><i>No ${statusType.toLowerCase()} records in database.</i></blockquote>`;
+  const icon = statusType === 'APPROVED' ? '🟢' : '🔴';
+  let text = `📡 <b>${icon} SYSTEM SCAN: ${statusType} DOSSIERS</b>\n━━━━━━━━━━━━━━━━━━━━\n`;
+  if (res.rows.length === 0) return text + `<blockquote><i>Zero localized ${statusType.toLowerCase()} artifacts detected in current database matrix.</i></blockquote>`;
   text += `<blockquote>`;
-  res.rows.forEach((r) => text += `• <b>${escapeHtml(r.department)}</b>: <code>${r.count}</code> student(s)\n`);
+  res.rows.forEach((r) => text += `• <b>${escapeHtml(r.department)}:</b> <code>${r.count}</code> active profile(s)\n`);
   text += `</blockquote>`;
   return text;
 }
