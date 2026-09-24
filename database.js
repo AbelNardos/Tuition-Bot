@@ -25,7 +25,9 @@ async function getGlobalTerm() {
   try {
     const res = await pool.query('SELECT global_season FROM group_settings LIMIT 1');
     return res.rows.length > 0 ? (res.rows[0].global_season || 1) : 1;
-  } catch (err) { return 1; }
+  } catch (err) { 
+    return 1; 
+  }
 }
 
 async function getActiveStaffGroupId() {
@@ -42,7 +44,29 @@ async function isStaff(ctx) {
     if (!staffGroupId) return false;
     const member = await ctx.api.getChatMember(staffGroupId, ctx.from.id);
     return ['creator', 'administrator', 'member'].includes(member.status);
-  } catch (err) { return false; }
+  } catch (err) { 
+    return false; 
+  }
+}
+
+async function getUserState(userId) {
+  let lang = 'en';
+  try {
+    const lRes = await pool.query('SELECT language FROM user_settings WHERE user_id = $1', [userId]);
+    if (lRes.rows.length > 0) lang = lRes.rows[0].language || 'en';
+  } catch(e) {}
+
+  let status = null;
+  let userSeason = 0;
+  try {
+    const tRes = await pool.query("SELECT status, global_season FROM tickets WHERE user_id = $1 AND status != 'WIPED' ORDER BY updated_at DESC LIMIT 1", [userId]);
+    if (tRes.rows.length > 0) {
+      status = tRes.rows[0].status;
+      userSeason = tRes.rows[0].global_season || 1;
+    }
+  } catch(e) {}
+
+  return { lang, status, userSeason };
 }
 
 async function getUserLang(userId) {
@@ -53,7 +77,11 @@ async function getUserLang(userId) {
 }
 
 async function setUserLang(userId, lang) {
-  try { await pool.query(`INSERT INTO user_settings (user_id, language) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET language = $2`, [userId, lang]); } catch (err) {}
+  try { 
+    await pool.query(`INSERT INTO user_settings (user_id, language) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET language = $2`, [userId, lang]); 
+  } catch (err) {
+    console.error('[setUserLang Error]:', err.message);
+  }
 }
 
 async function getPendingDepartment(userId) {
@@ -64,8 +92,8 @@ async function getPendingDepartment(userId) {
 }
 
 async function setPendingDepartment(userId, dept) {
-  try {
-    await pool.query(`INSERT INTO user_settings (user_id, pending_department) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET pending_department = $2`, [userId, dept]);
+  try { 
+    await pool.query(`INSERT INTO user_settings (user_id, pending_department) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET pending_department = $2`, [userId, dept]); 
   } catch (err) {
     console.error('[setPendingDepartment Error]:', err.message);
   }
@@ -91,9 +119,10 @@ async function clearStaffPendingModuleDept(userId) {
 }
 
 async function getOrCreateDepartmentTopic(ctx, departmentName, targetGroupId) {
-  const baseDept = departmentName.replace(/\s*\((Regular \/ Term\vert{}4-Year Complete)\)$/, '').trim();
+  const baseDept = departmentName.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
   const cached = await pool.query('SELECT topic_id FROM department_topics WHERE group_id = $1 AND department = $2 LIMIT 1', [targetGroupId, baseDept]);
   if (cached.rows.length > 0) return Number(cached.rows[0].topic_id);
+  
   const newTopic = await ctx.api.createForumTopic(targetGroupId, `📁 [${baseDept}]`);
   const topicId = newTopic.message_thread_id;
   await pool.query('DELETE FROM department_topics WHERE group_id = $1 AND department = $2', [targetGroupId, baseDept]);
@@ -104,17 +133,20 @@ async function getOrCreateDepartmentTopic(ctx, departmentName, targetGroupId) {
 async function getOrCreateModulesVaultTopic(ctx, targetGroupId) {
   const cached = await pool.query('SELECT modules_topic_id FROM group_settings WHERE group_id = $1 LIMIT 1', [targetGroupId]);
   if (cached.rows.length > 0 && cached.rows[0].modules_topic_id) return Number(cached.rows[0].modules_topic_id);
+  
   const newTopic = await ctx.api.createForumTopic(targetGroupId, '📚 [COURSE MODULES VAULT]');
   const topicId = newTopic.message_thread_id;
   await pool.query('UPDATE group_settings SET modules_topic_id = $1 WHERE group_id = $2', [topicId, targetGroupId]);
   return topicId;
 }
 
-function escapeHtml(str) { return str ? String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''; }
+function escapeHtml(str) { 
+  return str ? String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''; 
+}
 
 function formatDeptForDashboard(dept) {
   if (!dept) return 'Unassigned';
-  let cleaned = String(dept).replace(/\s*\((Regular \/ Term\vert{}4-Year Complete)\)/ig, '').trim();
+  let cleaned = String(dept).replace(/\s*\((Regular \/ Term|4-Year Complete)\)/ig, '').trim();
   return cleaned || 'Unassigned';
 }
 
@@ -136,16 +168,29 @@ async function pushToGoogleSheet(userId, username, fullDept, status, staffName, 
     const userRes = await pool.query('SELECT phone_number, language FROM user_settings WHERE user_id = $1', [userId]);
     const phone = userRes.rows[0]?.phone_number || 'N/A';
     const lang = userRes.rows[0]?.language || 'en';
-    let planType = 'Regular / Term'; let cleanDept = fullDept || 'Unknown';
-    if (cleanDept.includes('(4-Year Complete)')) { planType = '4-Year Complete'; cleanDept = cleanDept.replace(/\s*\((4-Year Complete)\)$/, '').trim(); } 
-    else if (cleanDept.includes('(Regular / Term)')) { planType = 'Regular / Term'; cleanDept = cleanDept.replace(/\s*\((Regular \/ Term)\)$/, '').trim(); }
-    const payload = { id: String(userId), username: username ? `@${username.replace('@', '')}` : 'N/A', phone: phone, dept: cleanDept, plan: planType, status: status, reason: reasonText, staff: staffName || 'System Action', time: new Date().toLocaleString('en-US', { timeZone: 'Africa/Addis_Ababa' }), lang: lang.toUpperCase() };
+    let planType = 'Regular / Term'; 
+    let cleanDept = fullDept || 'Unknown';
+    if (cleanDept.includes('(4-Year Complete)')) { 
+      planType = '4-Year Complete'; 
+      cleanDept = cleanDept.replace(/\s*\((4-Year Complete)\)$/, '').trim(); 
+    } else if (cleanDept.includes('(Regular / Term)')) { 
+      planType = 'Regular / Term'; 
+      cleanDept = cleanDept.replace(/\s*\((Regular \/ Term)\)$/, '').trim(); 
+    }
+    const payload = { 
+      id: String(userId), username: username ? `@${username.replace('@', '')}` : 'N/A', 
+      phone: phone, dept: cleanDept, plan: planType, status: status, reason: reasonText, 
+      staff: staffName || 'System Action', time: new Date().toLocaleString('en-US', { timeZone: 'Africa/Addis_Ababa' }), 
+      lang: lang.toUpperCase() 
+    };
     await fetch(webhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  } catch (err) {}
+  } catch (err) {
+    console.error('[Google Sheets Error]:', err.message);
+  }
 }
 
 module.exports = {
-  pool, initDB, getGlobalTerm, getActiveStaffGroupId, isStaff,
+  pool, initDB, getGlobalTerm, getActiveStaffGroupId, isStaff, getUserState,
   getUserLang, setUserLang, getPendingDepartment, setPendingDepartment, clearPendingDepartment,
   getStaffPendingModuleDept, setStaffPendingModuleDept, clearStaffPendingModuleDept,
   getOrCreateDepartmentTopic, getOrCreateModulesVaultTopic,
