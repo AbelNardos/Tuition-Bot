@@ -6,7 +6,7 @@ const { Bot, Keyboard, InputFile, webhookCallback } = require('grammy');
 const cron = require('node-cron');
 const cors = require('cors');
 
-// --- MODULAR IMPORTS WITH FULL ALIGNMENT ---
+// --- MODULAR IMPORTS ---
 const { 
   pool, initDB, getGlobalTerm, getActiveStaffGroupId, isStaff, getUserState,
   getUserLang, setUserLang, getPendingDepartment, setPendingDepartment, clearPendingDepartment,
@@ -35,8 +35,30 @@ process.on('unhandledRejection', (r) => console.error('[Unhandled Rejection]:', 
 process.on('uncaughtException', (err) => console.error('[Uncaught Exception]:', err.message));
 bot.catch((err) => console.error(`[Grammy Error]:`, err.error));
 
-// --- HELPER FUNCTION ---
-async function dropStudentMenu(userId, text, kb) {
+// ============================================================================
+// UI RENDERING ENGINES
+// ============================================================================
+
+async function buildStudentMenu(userId, lang, forceStatus = null) {
+  const currentSeason = await getGlobalTerm();
+  let status = forceStatus;
+  let userSeason = 0;
+  if (!status) {
+    const res = await pool.query("SELECT status, global_season FROM tickets WHERE user_id = $1 AND status != 'WIPED' ORDER BY updated_at DESC LIMIT 1", [userId]);
+    if (res.rows.length > 0) {
+      status = res.rows[0].status;
+      userSeason = res.rows[0].global_season || 1;
+    }
+  } else if (status === 'WIPED') {
+     userSeason = 0; 
+  } else {
+     userSeason = currentSeason; 
+  }
+  return getStudentKeyboard(status, userSeason, currentSeason, lang);
+}
+
+// Drops a brand new message (used for /start, photo uploads, admin wipes)
+async function dropMenu(userId, text, kb) {
   try {
     const res = await pool.query('SELECT last_menu_msg_id FROM user_settings WHERE user_id = $1', [userId]);
     if (res.rows[0]?.last_menu_msg_id) {
@@ -49,7 +71,21 @@ async function dropStudentMenu(userId, text, kb) {
   }
 }
 
-// --- API ROUTES ---
+// Transforms the existing message smoothly (used for all button presses)
+async function transformMenu(ctx, text, kb) {
+  try {
+    await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: kb });
+  } catch (e) {
+    if (!e.message.includes('message is not modified')) {
+      console.error("[Transform Menu Error]:", e.message);
+    }
+  }
+}
+
+// ============================================================================
+// API ROUTES
+// ============================================================================
+
 const requireApiKey = (req, res, next) => {
   const key = req.headers['x-api-key'];
   if (!key || key !== API_SECRET_KEY) return res.status(403).json({ error: 'Access Denied' });
@@ -64,7 +100,10 @@ app.use('/api', (req, res, next) => {
   requireApiKey(req, res, next);
 });
 
-// --- COMMAND ROUTING ---
+// ============================================================================
+// COMMAND ROUTING
+// ============================================================================
+
 bot.use(async (ctx, next) => {
   if (ctx.message && ctx.message.text && ctx.match) {
     const botUsername = ctx.me?.username;
@@ -104,7 +143,7 @@ bot.command('start', async (ctx) => {
 
   if (ctx.chat.type === 'private') {
     await clearPendingDepartment(ctx.from.id);
-    await dropStudentMenu(ctx.from.id, "🌐 <b>SELECT LANGUAGE / ቋንቋ ይምረጡ:</b>", { inline_keyboard: [[{text: "🇬🇧 ENGLISH", callback_data: "lang_en"}, {text: "🇪🇹 አማርኛ", callback_data: "lang_am"}]] });
+    await dropMenu(ctx.from.id, "🌐 <b>SELECT LANGUAGE / ቋንቋ ይምረጡ:</b>", { inline_keyboard: [[{text: "🇬🇧 ENGLISH", callback_data: "lang_en"}, {text: "🇪🇹 አማርኛ", callback_data: "lang_am"}]] });
   }
 });
 
@@ -115,7 +154,7 @@ bot.command('panel', async (ctx) => {
   const { lang, status, userSeason } = await getUserState(ctx.from.id);
   const currentSeason = await getGlobalTerm();
   const kb = getStudentKeyboard(status, userSeason, currentSeason, lang);
-  await dropStudentMenu(ctx.from.id, STRINGS[lang].portalWelcome, kb);
+  await dropMenu(ctx.from.id, STRINGS[lang].portalWelcome, kb);
 });
 
 bot.command('wipestudent', async (ctx) => {
@@ -137,7 +176,7 @@ bot.command('wipestudent', async (ctx) => {
     const { lang } = await getUserState(targetUid);
     const currentSeason = await getGlobalTerm();
     const wipeKb = getStudentKeyboard('WIPED', 0, currentSeason, lang);
-    await dropStudentMenu(targetUid, "🚫 <b>SYSTEM LOCKOUT</b>\nProfile wiped. Click below to begin fresh.", wipeKb);
+    await dropMenu(targetUid, "🚫 <b>SYSTEM LOCKOUT</b>\nProfile wiped. Click below to begin fresh.", wipeKb);
   } catch(e) {}
 
   ctx.reply(`✅ <b>STUDENT WIPED</b>: <code>${targetUid}</code>`, { parse_mode: 'HTML' });
@@ -163,7 +202,10 @@ bot.command('module', async (ctx) => {
   } catch (err) { ctx.reply(`❌ <b>ERROR:</b> ${err.message}`, { parse_mode: 'HTML' }); }
 });
 
-// --- MESSAGE HANDLERS ---
+// ============================================================================
+// MESSAGE HANDLERS
+// ============================================================================
+
 bot.on('message:contact', async (ctx) => {
   if (ctx.chat.type === 'private') {
     const phone = ctx.message.contact.phone_number;
@@ -172,7 +214,7 @@ bot.on('message:contact', async (ctx) => {
     await ctx.reply(lang === 'am' ? "✅ ስልክዎ ተመዝግቧል!" : "✅ Profile Verified!", { reply_markup: { remove_keyboard: true } });
     const currentSeason = await getGlobalTerm();
     const kb = getStudentKeyboard(status, userSeason, currentSeason, lang);
-    await dropStudentMenu(ctx.from.id, STRINGS[lang].portalWelcome, kb);
+    await dropMenu(ctx.from.id, STRINGS[lang].portalWelcome, kb);
   }
 });
 
@@ -186,10 +228,10 @@ bot.on('message:photo', async (ctx) => {
   activeUploads.add(userId);
 
   try {
-    if (status === 'PENDING') return dropStudentMenu(userId, STRINGS[lang].pendingExists, getStudentKeyboard('PENDING', userSeason, currentSeason, lang));
+    if (status === 'PENDING') return dropMenu(userId, STRINGS[lang].pendingExists, getStudentKeyboard('PENDING', userSeason, currentSeason, lang));
     
     const chosenDeptTagged = await getPendingDepartment(userId);
-    if (!chosenDeptTagged) return dropStudentMenu(userId, "⚠️ Select department first.", getStudentKeyboard(status, userSeason, currentSeason, lang));
+    if (!chosenDeptTagged) return dropMenu(userId, "⚠️ Select department first.", getStudentKeyboard(status, userSeason, currentSeason, lang));
 
     const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
     const staffGroupId = await getActiveStaffGroupId();
@@ -213,7 +255,7 @@ bot.on('message:photo', async (ctx) => {
     await clearPendingDepartment(userId);
     await pool.query(`INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, department, status, academic_year, academic_semester, global_season) VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10)`, [userId, ctx.from.username || 'Unknown', fileId, dbTopicId, forwardRes.message_id, sentTicketMsg.message_id, chosenDeptTagged, pRes.rows[0].pending_year || 1, pRes.rows[0].pending_semester || 1, currentSeason]);
     
-    await dropStudentMenu(userId, STRINGS[lang].receiptReceived, getStudentKeyboard('PENDING', currentSeason, currentSeason, lang));
+    await dropMenu(userId, STRINGS[lang].receiptReceived, getStudentKeyboard('PENDING', currentSeason, currentSeason, lang));
   } catch (err) {
     console.error("[Photo Handler Error]:", err.message);
   } finally { 
@@ -221,7 +263,10 @@ bot.on('message:photo', async (ctx) => {
   }
 });
 
-// --- CALLBACK QUERIES ---
+// ============================================================================
+// SMOOTH "TRANSFORM" CALLBACK QUERIES
+// ============================================================================
+
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const lang = ctx.match[1];
@@ -237,7 +282,7 @@ bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
   const { status, userSeason } = await getUserState(ctx.from.id);
   const currentSeason = await getGlobalTerm();
   const kb = getStudentKeyboard(status, userSeason, currentSeason, lang);
-  await dropStudentMenu(ctx.from.id, STRINGS[lang].portalWelcome, kb);
+  await transformMenu(ctx, STRINGS[lang].portalWelcome, kb);
 });
 
 bot.callbackQuery('cmd_status', async (ctx) => {
@@ -245,7 +290,7 @@ bot.callbackQuery('cmd_status', async (ctx) => {
   const { lang, status, userSeason } = await getUserState(ctx.from.id);
   const currentSeason = await getGlobalTerm();
   
-  if (!status) return dropStudentMenu(ctx.from.id, "ℹ️ No traces found.", getStudentKeyboard(null, 0, currentSeason, lang));
+  if (!status) return transformMenu(ctx, "ℹ️ No traces found.", getStudentKeyboard(null, 0, currentSeason, lang));
   
   const res = await pool.query("SELECT department, academic_year, academic_semester FROM tickets WHERE user_id = $1 AND status != 'WIPED' ORDER BY updated_at DESC LIMIT 1", [ctx.from.id]);
   const t = res.rows[0];
@@ -257,7 +302,7 @@ bot.callbackQuery('cmd_status', async (ctx) => {
     msg += `<blockquote>• <b>Status:</b> <b>${status}</b></blockquote>`;
   }
   
-  await dropStudentMenu(ctx.from.id, msg, getStudentKeyboard(status, userSeason, currentSeason, lang));
+  await transformMenu(ctx, msg, getStudentKeyboard(status, userSeason, currentSeason, lang));
 });
 
 bot.callbackQuery('cmd_submit', async (ctx) => {
@@ -272,7 +317,7 @@ bot.callbackQuery('cmd_submit', async (ctx) => {
       nextY = calcY; nextS = calcS;
   }
   await pool.query('UPDATE user_settings SET pending_year = $1, pending_semester = $2 WHERE user_id = $3', [nextY, nextS, ctx.from.id]);
-  await dropStudentMenu(ctx.from.id, STRINGS[lang].selectDept, getDepartmentKeyboard());
+  await transformMenu(ctx, STRINGS[lang].selectDept, getDepartmentKeyboard());
 });
 
 bot.callbackQuery(/^dept_(.+)$/, async (ctx) => {
@@ -280,23 +325,48 @@ bot.callbackQuery(/^dept_(.+)$/, async (ctx) => {
   const chosenDept = ctx.match[1];
   await setPendingDepartment(ctx.from.id, chosenDept);
   const { lang } = await getUserState(ctx.from.id);
-  await dropStudentMenu(ctx.from.id, STRINGS[lang].sendReceiptPrompt.replace('{dept}', escapeHtml(chosenDept)), null);
+  await transformMenu(ctx, STRINGS[lang].sendReceiptPrompt.replace('{dept}', escapeHtml(chosenDept)), null);
 });
 
-bot.callbackQuery('cmd_download_pdf', async (ctx) => {
+bot.callbackQuery('cmd_modules', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   const { lang, status, userSeason } = await getUserState(ctx.from.id);
   const currentSeason = await getGlobalTerm();
-  if (status !== 'APPROVED' || userSeason < currentSeason) return ctx.answerCallbackQuery("⚠️ No valid clearance.");
-  
-  const res = await pool.query("SELECT department, username, academic_year, academic_semester FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1", [ctx.from.id]);
-  const t = res.rows[0];
-  try {
-    await ctx.answerCallbackQuery("Generating PDF...");
-    const pdfBuf = await generateApprovalPDF(ctx.from.id, t.username, t.department, 'Finance Office', bot.botInfo?.username, lang, t.academic_year || 1, t.academic_semester || 1);
-    await ctx.replyWithDocument(new InputFile(pdfBuf, `Clearance_${ctx.from.id}.pdf`));
-  } catch (e) { 
-    ctx.answerCallbackQuery("Error generating PDF."); 
+  if (status !== 'APPROVED' || userSeason < currentSeason) {
+    return transformMenu(ctx, `🔒 <b>VAULT ACCESS DENIED</b>`, getStudentKeyboard(status, userSeason, currentSeason, lang));
   }
+  const res = await pool.query("SELECT department FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1", [ctx.from.id]);
+  const studentDept = res.rows[0].department.replace(/\s*\((Regular \/ Term\vert{}4-Year Complete)\)$/, '').trim();
+  const mods = await pool.query("SELECT id, title FROM department_modules WHERE department ILIKE $1 ORDER BY id ASC", [`%${studentDept}%`]);
+  
+  if (mods.rows.length === 0) return transformMenu(ctx, `📚 <b>VAULT EMPTY</b>`, getStudentKeyboard(status, userSeason, currentSeason, lang));
+  
+  const kb = new InlineKeyboard();
+  mods.rows.forEach((m) => kb.text(`📄 ${m.title}`, `dlmod_${m.id}`).row());
+  kb.text("🔙 Home Menu", "cmd_menu");
+  await transformMenu(ctx, `📚 <b>SECURE VAULT: <code>${escapeHtml(studentDept)}</code></b>`, kb);
+});
+
+bot.callbackQuery('cmd_menu', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const { lang, status, userSeason } = await getUserState(ctx.from.id);
+  await transformMenu(ctx, STRINGS[lang].portalWelcome, getStudentKeyboard(status, userSeason, await getGlobalTerm(), lang));
+});
+
+bot.callbackQuery('cmd_history', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const { lang, status, userSeason } = await getUserState(ctx.from.id);
+  const currentSeason = await getGlobalTerm();
+  const res = await pool.query("SELECT department, status, academic_year, academic_semester, created_at FROM tickets WHERE user_id = $1 AND status != 'WIPED' ORDER BY created_at DESC LIMIT 10", [ctx.from.id]);
+  if (res.rows.length === 0) return transformMenu(ctx, "ℹ️ <b>SYSTEM ALERT:</b> Log history empty.", getStudentKeyboard(status, userSeason, currentSeason, lang));
+
+  let text = "📜 <b>PROFILE AUDIT LOGS:</b>\n━━━━━━━━━━━━━━━━━━━━\n";
+  for (let idx = 0; idx < res.rows.length; idx++) {
+    const r = res.rows[idx];
+    const icon = r.status === 'APPROVED' ? "✅" : "❌";
+    text += `<code>[${idx + 1}]</code> ${icon} <b>${escapeHtml(r.department)} (Y${r.academic_year || 1}S${r.academic_semester || 1})</b>\n`;
+  }
+  await transformMenu(ctx, text, getStudentKeyboard(status, userSeason, currentSeason, lang));
 });
 
 bot.callbackQuery('cmd_cancel_pending', async (ctx) => {
@@ -316,9 +386,10 @@ bot.callbackQuery('cmd_cancel_pending', async (ctx) => {
        await ctx.api.deleteMessage(staffGroupId, Number(t.ticket_msg_id));
      } catch(e) {}
   }
-  await dropStudentMenu(userId, "✅ <b>SUBMISSION CANCELLED</b>", getStudentKeyboard(null, 0, await getGlobalTerm(), lang));
+  await transformMenu(ctx, "✅ <b>SUBMISSION CANCELLED</b>", getStudentKeyboard(null, 0, await getGlobalTerm(), lang));
 });
 
+// Admin-facing Transform Callbacks
 bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = Number(ctx.match[1]);
@@ -327,7 +398,7 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   if (updateRes.rowCount === 0) return ctx.editMessageText("⚠️ Already finalized.");
   const { lang } = await getUserState(userId);
   await ctx.api.sendMessage(userId, STRINGS[lang].approvedMsg).catch(()=>{});
-  await dropStudentMenu(userId, STRINGS[lang].portalWelcome, getStudentKeyboard('APPROVED', await getGlobalTerm(), await getGlobalTerm(), lang));
+  await dropMenu(userId, STRINGS[lang].portalWelcome, getStudentKeyboard('APPROVED', await getGlobalTerm(), await getGlobalTerm(), lang));
   ctx.editMessageText("✅ Approved.");
 });
 
@@ -354,27 +425,24 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   const rejectText = STRINGS[lang].rejectedMsg.replace('{reason}', escapeHtml(reasonText)).replace('{message}', customMessage);
   
   try { await ctx.api.sendMessage(userId, `🔔 <b>STATUS UPDATE:</b>\n\n${rejectText}`, { parse_mode: 'HTML' }); } catch (e) {}
-  await dropStudentMenu(userId, STRINGS[lang].portalWelcome, getStudentKeyboard('REJECTED', 0, await getGlobalTerm(), lang));
+  await dropMenu(userId, STRINGS[lang].portalWelcome, getStudentKeyboard('REJECTED', 0, await getGlobalTerm(), lang));
   await ctx.editMessageText(`❌ <b>REJECTED</b>: ${escapeHtml(reasonText)}`, { parse_mode: 'HTML' });
 });
 
-bot.callbackQuery('cmd_modules', async (ctx) => {
-  try { await ctx.answerCallbackQuery(); } catch (e) {}
+bot.callbackQuery('cmd_download_pdf', async (ctx) => {
   const { lang, status, userSeason } = await getUserState(ctx.from.id);
   const currentSeason = await getGlobalTerm();
-  if (status !== 'APPROVED' || userSeason < currentSeason) {
-    return dropStudentMenu(ctx.from.id, `🔒 <b>VAULT ACCESS DENIED</b>`, getStudentKeyboard(status, userSeason, currentSeason, lang));
+  if (status !== 'APPROVED' || userSeason < currentSeason) return ctx.answerCallbackQuery("⚠️ No valid clearance.");
+  
+  const res = await pool.query("SELECT department, username, academic_year, academic_semester FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1", [ctx.from.id]);
+  const t = res.rows[0];
+  try {
+    await ctx.answerCallbackQuery("Generating PDF...");
+    const pdfBuf = await generateApprovalPDF(ctx.from.id, t.username, t.department, 'Finance Office', bot.botInfo?.username, lang, t.academic_year || 1, t.academic_semester || 1);
+    await ctx.replyWithDocument(new InputFile(pdfBuf, `Clearance_${ctx.from.id}.pdf`));
+  } catch (e) { 
+    ctx.answerCallbackQuery("Error generating PDF."); 
   }
-  const res = await pool.query("SELECT department FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1", [ctx.from.id]);
-  const studentDept = res.rows[0].department.replace(/\s*\((Regular \/ Term\vert{}4-Year Complete)\)$/, '').trim();
-  const mods = await pool.query("SELECT id, title FROM department_modules WHERE department ILIKE $1 ORDER BY id ASC", [`%${studentDept}%`]);
-  
-  if (mods.rows.length === 0) return dropStudentMenu(ctx.from.id, `📚 <b>VAULT EMPTY</b>`, getStudentKeyboard(status, userSeason, currentSeason, lang));
-  
-  const kb = new InlineKeyboard();
-  mods.rows.forEach((m) => kb.text(`📄 ${m.title}`, `dlmod_${m.id}`).row());
-  kb.text("🔙 Home Menu", "cmd_menu");
-  await dropStudentMenu(ctx.from.id, `📚 <b>SECURE VAULT: <code>${escapeHtml(studentDept)}</code></b>`, kb);
 });
 
 bot.callbackQuery(/^dlmod_(\d+)$/, async (ctx) => {
@@ -384,28 +452,6 @@ bot.callbackQuery(/^dlmod_(\d+)$/, async (ctx) => {
   if (res.rows.length === 0) return ctx.reply("⚠️ <b>ERROR 404:</b> Document purged or corrupted.", { parse_mode: 'HTML' });
   try { await pool.query("INSERT INTO module_downloads (module_id, user_id) VALUES ($1, $2) ON CONFLICT (module_id, user_id) DO NOTHING", [modId, ctx.from.id]); } catch (e) {}
   try { await ctx.replyWithDocument(res.rows[0].file_id, { caption: `📖 <b>${escapeHtml(res.rows[0].title)}</b>`, parse_mode: 'HTML' }); } catch (e) {}
-});
-
-bot.callbackQuery('cmd_menu', async (ctx) => {
-  try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const { lang, status, userSeason } = await getUserState(ctx.from.id);
-  await dropStudentMenu(ctx.from.id, STRINGS[lang].portalWelcome, getStudentKeyboard(status, userSeason, await getGlobalTerm(), lang));
-});
-
-bot.callbackQuery('cmd_history', async (ctx) => {
-  try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const { lang, status, userSeason } = await getUserState(ctx.from.id);
-  const currentSeason = await getGlobalTerm();
-  const res = await pool.query("SELECT department, status, academic_year, academic_semester, created_at FROM tickets WHERE user_id = $1 AND status != 'WIPED' ORDER BY created_at DESC LIMIT 10", [ctx.from.id]);
-  if (res.rows.length === 0) return dropStudentMenu(ctx.from.id, "ℹ️ <b>SYSTEM ALERT:</b> Log history empty.", getStudentKeyboard(status, userSeason, currentSeason, lang));
-
-  let text = "📜 <b>PROFILE AUDIT LOGS:</b>\n━━━━━━━━━━━━━━━━━━━━\n";
-  for (let idx = 0; idx < res.rows.length; idx++) {
-    const r = res.rows[idx];
-    const icon = r.status === 'APPROVED' ? "✅" : "❌";
-    text += `<code>[${idx + 1}]</code> ${icon} <b>${escapeHtml(r.department)} (Y${r.academic_year || 1}S${r.academic_semester || 1})</b>\n`;
-  }
-  await dropStudentMenu(ctx.from.id, text, getStudentKeyboard(status, userSeason, currentSeason, lang));
 });
 
 // --- SERVER INIT ---
