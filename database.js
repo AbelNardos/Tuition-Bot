@@ -25,9 +25,7 @@ async function getGlobalTerm() {
   try {
     const res = await pool.query('SELECT global_season FROM group_settings LIMIT 1');
     return res.rows.length > 0 ? (res.rows[0].global_season || 1) : 1;
-  } catch (err) { 
-    return 1; 
-  }
+  } catch (err) { return 1; }
 }
 
 async function getActiveStaffGroupId() {
@@ -44,9 +42,7 @@ async function isStaff(ctx) {
     if (!staffGroupId) return false;
     const member = await ctx.api.getChatMember(staffGroupId, ctx.from.id);
     return ['creator', 'administrator', 'member'].includes(member.status);
-  } catch (err) { 
-    return false; 
-  }
+  } catch (err) { return false; }
 }
 
 async function getUserState(userId) {
@@ -77,11 +73,7 @@ async function getUserLang(userId) {
 }
 
 async function setUserLang(userId, lang) {
-  try { 
-    await pool.query(`INSERT INTO user_settings (user_id, language) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET language = $2`, [userId, lang]); 
-  } catch (err) {
-    console.error('[setUserLang Error]:', err.message);
-  }
+  try { await pool.query(`INSERT INTO user_settings (user_id, language) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET language = $2`, [userId, lang]); } catch (err) {}
 }
 
 async function getPendingDepartment(userId) {
@@ -92,11 +84,7 @@ async function getPendingDepartment(userId) {
 }
 
 async function setPendingDepartment(userId, dept) {
-  try { 
-    await pool.query(`INSERT INTO user_settings (user_id, pending_department) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET pending_department = $2`, [userId, dept]); 
-  } catch (err) {
-    console.error('[setPendingDepartment Error]:', err.message);
-  }
+  try { await pool.query(`INSERT INTO user_settings (user_id, pending_department) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET pending_department = $2`, [userId, dept]); } catch (err) {}
 }
 
 async function clearPendingDepartment(userId) {
@@ -184,9 +172,7 @@ async function pushToGoogleSheet(userId, username, fullDept, status, staffName, 
       lang: lang.toUpperCase() 
     };
     await fetch(webhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  } catch (err) {
-    console.error('[Google Sheets Error]:', err.message);
-  }
+  } catch (err) {}
 }
 
 module.exports = {

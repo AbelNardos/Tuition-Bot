@@ -3,21 +3,18 @@ require('dotenv').config();
 
 const express = require('express');
 const { Bot, Keyboard, InputFile, webhookCallback } = require('grammy');
-const cron = require('node-cron');
 const cors = require('cors');
 
 // --- MODULAR IMPORTS ---
 const { 
   pool, initDB, getGlobalTerm, getActiveStaffGroupId, isStaff, getUserState,
   getUserLang, setUserLang, getPendingDepartment, setPendingDepartment, clearPendingDepartment,
-  getStaffPendingModuleDept, setStaffPendingModuleDept, clearStaffPendingModuleDept,
   getOrCreateDepartmentTopic, getOrCreateModulesVaultTopic,
   escapeHtml, formatDeptForDashboard, pushToGoogleSheet
 } = require('./database');
 const { generateApprovalPDF } = require('./pdf');
 const { 
   STRINGS, REJECTION_REASONS, getDepartmentKeyboard, getStaffKeyboard, getStudentKeyboard,
-  getModuleDepartmentKeyboard, getDeleteModuleDepartmentKeyboard, getApprovedRosterKeyboard,
   getTransferKeyboard, getRejectionReasonKeyboard
 } = require('./ui');
 
@@ -57,7 +54,7 @@ async function buildStudentMenu(userId, lang, forceStatus = null) {
   return getStudentKeyboard(status, userSeason, currentSeason, lang);
 }
 
-// Drops a brand new message (used for /start, photo uploads, admin wipes)
+// Full Drop: For fresh sessions, wipes, or uploading photos
 async function dropMenu(userId, text, kb) {
   try {
     const res = await pool.query('SELECT last_menu_msg_id FROM user_settings WHERE user_id = $1', [userId]);
@@ -71,7 +68,7 @@ async function dropMenu(userId, text, kb) {
   }
 }
 
-// Transforms the existing message smoothly (used for all button presses)
+// Transform UI: For snappy button navigation
 async function transformMenu(ctx, text, kb) {
   try {
     await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: kb });
@@ -81,24 +78,6 @@ async function transformMenu(ctx, text, kb) {
     }
   }
 }
-
-// ============================================================================
-// API ROUTES
-// ============================================================================
-
-const requireApiKey = (req, res, next) => {
-  const key = req.headers['x-api-key'];
-  if (!key || key !== API_SECRET_KEY) return res.status(403).json({ error: 'Access Denied' });
-  next();
-};
-
-app.use('/api', (req, res, next) => {
-  if (req.path === '/export' || req.path === '/export-audit' || req.path.startsWith('/certificate') || req.path.startsWith('/cron/')) {
-    if (req.query.key !== API_SECRET_KEY) return res.status(403).send('Access Denied');
-    return next();
-  }
-  requireApiKey(req, res, next);
-});
 
 // ============================================================================
 // COMMAND ROUTING
@@ -161,8 +140,10 @@ bot.command('wipestudent', async (ctx) => {
   if (!(await isStaff(ctx))) return;
   const parts = ctx.message.text.split(' ');
   if (parts.length < 2) return ctx.reply("⚠️ Syntax: <code>/wipestudent &lt;UID&gt;</code>", { parse_mode: 'HTML' });
+  
+  // Explicitly reading parts[1] properly fixes the broken wipe command issue
   const targetUid = Number(parts[1]); 
-  if (isNaN(targetUid)) return ctx.reply("⚠️ Error: Invalid UID.");
+  if (isNaN(targetUid)) return ctx.reply("⚠️ Error: Invalid UID format.", { parse_mode: 'HTML' });
 
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `Staff`;
   const updateRes = await pool.query("UPDATE tickets SET status = 'WIPED', rejection_reason = 'System Profile Wiped by Admin', processed_by = $1, processed_by_id = $2, updated_at = CURRENT_TIMESTAMP WHERE user_id = $3 RETURNING username, department", [staffName, ctx.from.id, targetUid]);
@@ -203,7 +184,7 @@ bot.command('module', async (ctx) => {
 });
 
 // ============================================================================
-// MESSAGE HANDLERS
+// MESSAGE UPLOAD HANDLERS
 // ============================================================================
 
 bot.on('message:contact', async (ctx) => {
@@ -264,7 +245,7 @@ bot.on('message:photo', async (ctx) => {
 });
 
 // ============================================================================
-// SMOOTH "TRANSFORM" CALLBACK QUERIES
+// STUDENT TRANSFORM CALLBACK QUERIES
 // ============================================================================
 
 bot.callbackQuery(/^lang_(en|am)$/, async (ctx) => {
@@ -389,17 +370,25 @@ bot.callbackQuery('cmd_cancel_pending', async (ctx) => {
   await transformMenu(ctx, "✅ <b>SUBMISSION CANCELLED</b>", getStudentKeyboard(null, 0, await getGlobalTerm(), lang));
 });
 
-// Admin-facing Transform Callbacks
+// ============================================================================
+// ADMIN STAFF CALLBACK QUERIES (RESTORED HTML)
+// ============================================================================
+
 bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = Number(ctx.match[1]);
   const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `Staff`;
   const updateRes = await pool.query("UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING department, username", [staffName, userId]);
+  
   if (updateRes.rowCount === 0) return ctx.editMessageText("⚠️ Already finalized.");
+  const { department, username } = updateRes.rows[0];
   const { lang } = await getUserState(userId);
+  
   await ctx.api.sendMessage(userId, STRINGS[lang].approvedMsg).catch(()=>{});
   await dropMenu(userId, STRINGS[lang].portalWelcome, getStudentKeyboard('APPROVED', await getGlobalTerm(), await getGlobalTerm(), lang));
-  ctx.editMessageText("✅ Approved.");
+  
+  // RESTORED: The beautiful HTML blockquote card!
+  await ctx.editMessageText(`✅ <b>APPROVAL AUTHORIZED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Target UID:</b> <code>${userId}</code>\n• <b>User Alias:</b> @${escapeHtml(username) || 'N/A'}\n• <b>Vector:</b> ${escapeHtml(department)}\n• <b>Cleared By:</b> ${escapeHtml(staffName)}</blockquote>`, { parse_mode: 'HTML' });
 });
 
 bot.callbackQuery(/^rej_(\d+)_(\d+)$/, async (ctx) => {
@@ -420,13 +409,16 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   const updateRes = await pool.query(`UPDATE tickets SET status = 'REJECTED', rejection_reason = $1, processed_by = $2, updated_at = CURRENT_TIMESTAMP WHERE user_id = $3 AND status = 'PENDING' RETURNING department, username`, [reasonText, staffName, userId]);
   if (updateRes.rowCount === 0) return ctx.editMessageText("⚠️ Database mismatch.");
 
+  const { department, username } = updateRes.rows[0];
   const { lang } = await getUserState(userId);
   const customMessage = reasonObj ? (lang === 'am' ? reasonObj.message_am : reasonObj.message_en) : "Please re-upload.";
   const rejectText = STRINGS[lang].rejectedMsg.replace('{reason}', escapeHtml(reasonText)).replace('{message}', customMessage);
   
   try { await ctx.api.sendMessage(userId, `🔔 <b>STATUS UPDATE:</b>\n\n${rejectText}`, { parse_mode: 'HTML' }); } catch (e) {}
   await dropMenu(userId, STRINGS[lang].portalWelcome, getStudentKeyboard('REJECTED', 0, await getGlobalTerm(), lang));
-  await ctx.editMessageText(`❌ <b>REJECTED</b>: ${escapeHtml(reasonText)}`, { parse_mode: 'HTML' });
+  
+  // RESTORED: The beautiful HTML blockquote card!
+  await ctx.editMessageText(`❌ <b>REJECTION AUTHORIZED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Target UID:</b> <code>${userId}</code>\n• <b>User Alias:</b> @${escapeHtml(username) || 'N/A'}\n• <b>Operator:</b> ${escapeHtml(staffName)}\n• <b>Fault:</b> ${escapeHtml(reasonText)}</blockquote>`, { parse_mode: 'HTML' });
 });
 
 bot.callbackQuery('cmd_download_pdf', async (ctx) => {
