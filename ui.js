@@ -26,8 +26,8 @@ const STRINGS = {
 const REJECTION_REASONS = [
   { label: "📷 BLURRY/UNREADABLE MEDIA", code: "blurry", message_en: "Please ensure your receipt image is clear, fully visible, and uncropped.", message_am: "እባክዎን የደረሰኝዎ ፎቶ ግልጽ እና ሙሉ በሙሉ የሚታይ መሆኑን አረጋግተው እንደገና ይላኩ።" },
   { label: "💵 TRANSACTION AMOUNT MISMATCH", code: "amount", message_en: "The payment amount does not match your required tuition fees.", message_am: "የተከፈለው የገንዘብ መጠን ከተፈለገው የትምህርት ክፍያ ጋር አይመሳሰልም።" },
-  { label: "🚫 INVALID/UNVERIFIED RECEIPT", code: "invalid", message_en: "This receipt could not be verified by our finance team.", message_am: "ይህ ደረሰኝ ሊረጋገጥ አልቻለም። እባክዎን ኦፊሴላዊ የባንክ ደረሰኝ ይላኩ።" },
-  { label: "👤 CREDENTIAL MISMATCH", code: "mismatch", message_en: "The name or Student ID on the receipt does not match your profile details.", message_am: "በደረሰኙ ላይ ያለው ስም ወይም የተማሪ መታወቂያ ከተመዘገበው መረጃ ጋር አይመሳሰልም።" }
+  { label: "🚫 INVALID/UNVERIFIED RECEIPT", code: "invalid", message_en: "This receipt could not be verified by our finance team. Please submit an official bank transaction receipt.", message_am: "ይህ ደረሰኝ ሊረጋገጥ አልቻለም። እባክዎን ኦፊሴላዊ የባንክ ደረሰኝ ይላኩ።" },
+  { label: "👤 CREDENTIAL MISMATCH (NAME/ID)", code: "mismatch", message_en: "The name or Student ID on the receipt does not match your profile details.", message_am: "በደረሰኙ ላይ ያለው ስም ወይም የተማሪ መታወቂያ ከተመዘገበው መረጃ ጋር አይመሳሰልም።" }
 ];
 
 function getDepartmentKeyboard() {

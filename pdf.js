@@ -1,5 +1,7 @@
 const PDFDocument = require('pdfkit');
 const QRCode = require('qrcode');
+const fs = require('fs');
+const path = require('path');
 
 function cleanForPDF(str, fallbackStr = '') {
   if (!str) return fallbackStr;
@@ -24,7 +26,14 @@ async function generateApprovalPDF(userId, username, department, staffName, botU
 
       doc.rect(20, 20, pw - 40, ph - 40).lineWidth(4).stroke('#0a192f'); doc.rect(28, 28, pw - 56, ph - 56).lineWidth(1).stroke('#cda434');
 
-      let currentY = 195;
+      let currentY = 70;
+      const extensions = ['logo.png', 'logo.jpg', 'logo.jpeg'];
+      let logoPath = null;
+      for (const ext of extensions) { const p = path.join(__dirname, ext); if (fs.existsSync(p)) { logoPath = p; break; } }
+
+      if (logoPath) { doc.image(logoPath, (pw - 110) / 2, currentY, { width: 110 }); currentY += 125; } 
+      else { doc.circle(pw / 2, currentY + 40, 40).lineWidth(2).stroke('#0a192f'); doc.font('Helvetica-Bold').fontSize(36).fillColor('#0a192f').text('RG', 0, currentY + 22, { align: 'center', width: pw }); currentY += 100; }
+
       doc.font('Helvetica-Bold').fontSize(24).fillColor('#0a192f').text('RENAISSANCE GLOBAL', 0, currentY, { align: 'center', width: pw, characterSpacing: 2 }); currentY += 30;
       doc.font('Helvetica').fontSize(12).fillColor('#475569').text('COLLEGE OF OPEN & VIRTUAL LEARNING', 0, currentY, { align: 'center', width: pw, characterSpacing: 1 }); currentY += 65;
 
@@ -51,7 +60,7 @@ async function generateApprovalPDF(userId, username, department, staffName, botU
       const authX = 80; doc.font('Helvetica-Bold').fontSize(11).fillColor('#334155').text('VERIFICATION DETAILS', authX, currentY);
       doc.font('Helvetica').fontSize(10).fillColor('#475569');
       doc.text(`Authorized By: ${cleanForPDF(staffName, 'System Admin')}`, authX, currentY + 20); 
-      doc.text(`Timestamp: ${new Date().toLocaleString()}`, authX, currentY + 38);
+      doc.text(`Timestamp: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Addis_Ababa' })}`, authX, currentY + 38);
 
       const qrData = botUsername ? `https://t.me/${botUsername}?start=verify_${userId}` : `RENAISSANCE_GLOBAL_VERIFY:${userId}`;
       const qrBuffer = await QRCode.toBuffer(qrData, { width: 110, margin: 1, color: { dark: '#0a192f', light: '#ffffff' } });

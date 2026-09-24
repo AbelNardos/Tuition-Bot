@@ -3,6 +3,7 @@ require('dotenv').config();
 
 const express = require('express');
 const { Bot, Keyboard, InputFile, webhookCallback } = require('grammy');
+const cron = require('node-cron');
 const cors = require('cors');
 
 // --- MODULAR IMPORTS ---
@@ -10,11 +11,12 @@ const {
   pool, initDB, getGlobalTerm, getActiveStaffGroupId, isStaff, getUserState,
   getUserLang, setUserLang, getPendingDepartment, setPendingDepartment, clearPendingDepartment,
   getOrCreateDepartmentTopic, getOrCreateModulesVaultTopic,
-  escapeHtml, formatDeptForDashboard, pushToGoogleSheet
+  escapeHtml, formatDeptForDashboard, generateSummaryText, pushToGoogleSheet
 } = require('./database');
 const { generateApprovalPDF } = require('./pdf');
 const { 
   STRINGS, REJECTION_REASONS, getDepartmentKeyboard, getStaffKeyboard, getStudentKeyboard,
+  getModuleDepartmentKeyboard, getDeleteModuleDepartmentKeyboard, getApprovedRosterKeyboard,
   getTransferKeyboard, getRejectionReasonKeyboard
 } = require('./ui');
 
@@ -25,6 +27,7 @@ app.use(cors());
 const PORT = process.env.PORT || 10000;
 const bot = new Bot(process.env.BOT_TOKEN);
 const API_SECRET_KEY = process.env.API_SECRET_KEY || 'RG_ADMIN_SECURE_KEY_2026';
+const APPROVED_THREAD_ID = process.env.APPROVED_THREAD_ID ? Number(process.env.APPROVED_THREAD_ID) : null;
 
 const activeUploads = new Set(); 
 
@@ -76,6 +79,205 @@ async function transformMenu(ctx, text, kb) {
     }
   }
 }
+
+// ============================================================================
+// EXPRESS REST API (REACT FRONTEND)
+// ============================================================================
+
+const requireApiKey = (req, res, next) => {
+  const key = req.headers['x-api-key'];
+  if (!key || key !== API_SECRET_KEY) return res.status(403).json({ error: 'Access Denied' });
+  next();
+};
+
+app.use('/api', (req, res, next) => {
+  if (req.path === '/export' || req.path === '/export-audit' || req.path.startsWith('/certificate') || req.path.startsWith('/cron/')) {
+    if (req.query.key !== API_SECRET_KEY) return res.status(403).send('Access Denied');
+    return next();
+  }
+  requireApiKey(req, res, next);
+});
+
+app.post('/api/broadcast', async (req, res) => {
+  const { message, targetStatus, targetDept } = req.body;
+  res.status(200).json({ success: true, status: 'DISPATCHED_TO_BACKGROUND' });
+  try {
+    let query = ''; let params = [];
+    if ((!targetStatus || targetStatus === 'ALL') && (!targetDept || targetDept === 'ALL')) {
+      query = 'SELECT DISTINCT user_id FROM user_settings WHERE user_id IS NOT NULL';
+    } else {
+      let conditions = []; let paramIndex = 1;
+      query = `SELECT DISTINCT t.user_id FROM tickets t INNER JOIN (SELECT user_id, MAX(updated_at) as max_date FROM tickets GROUP BY user_id) latest ON t.user_id = latest.user_id AND t.updated_at = latest.max_date WHERE 1=1`;
+      if (targetStatus && targetStatus !== 'ALL') { conditions.push(`t.status = $${paramIndex++}`); params.push(targetStatus); }
+      if (targetDept && targetDept !== 'ALL') { conditions.push(`t.department ILIKE $${paramIndex++}`); params.push(`%${targetDept}%`); }
+      if (conditions.length > 0) query += " AND " + conditions.join(" AND ");
+    }
+    const { rows } = await pool.query(query, params);
+    for (const row of rows) {
+      try { await bot.api.sendMessage(row.user_id, `📢 <b>RENAISSANCE GLOBAL ALERT</b>\n\n${message}`, { parse_mode: 'HTML' }); } catch (err) {}
+    }
+  } catch (error) {}
+});
+
+app.post('/api/nudge-module', async (req, res) => {
+  const { moduleId } = req.body;
+  res.status(200).json({ success: true, status: 'DISPATCHED' });
+  try {
+    const modRes = await pool.query('SELECT title, department FROM department_modules WHERE id = $1', [moduleId]);
+    if (modRes.rows.length === 0) return;
+    const { title, department } = modRes.rows[0];
+    const cleanDept = formatDeptForDashboard(department);
+    const dlRes = await pool.query('SELECT user_id FROM module_downloads WHERE module_id = $1', [moduleId]);
+    const downloadedIds = new Set(dlRes.rows.map(r => String(r.user_id)));
+    const currentSeason = await getGlobalTerm();
+
+    const usersRes = await pool.query(`SELECT t.user_id, u.language, t.department, t.global_season FROM tickets t LEFT JOIN user_settings u ON t.user_id = u.user_id INNER JOIN (SELECT user_id, MAX(updated_at) as max_date FROM tickets GROUP BY user_id) latest ON t.user_id = latest.user_id AND t.updated_at = latest.max_date WHERE t.status = 'APPROVED'`);
+    const missingUsers = usersRes.rows.filter(u => {
+      const matchDept = formatDeptForDashboard(u.department) === cleanDept;
+      const isCleared = (u.global_season || 1) >= currentSeason;
+      return matchDept && isCleared && !downloadedIds.has(String(u.user_id));
+    });
+
+    for (const user of missingUsers) {
+      const lang = user.language || 'en';
+      const msg = lang === 'am' ? `🔔 <b>የማስታወሻ መልእክት!</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>እባክዎን <b>${escapeHtml(title)}</b> የተሰኘውን የትምህርት ሞጁል ገብተው ያውርዱ።</blockquote>` : `🔔 <b>ACADEMIC REMINDER!</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>You have not yet downloaded the required module: <b>${escapeHtml(title)}</b>.</blockquote>`;
+      try { await bot.api.sendMessage(user.user_id, msg, { parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{text: lang==='am'?"⬇️ አውርድ":"⬇️ DOWNLOAD", callback_data: `dlmod_${moduleId}`}]] }}); } catch (e) {}
+    }
+  } catch (err) {}
+});
+
+app.get('/api/live-dashboard', async (req, res) => {
+  try {
+    const countRes = await pool.query('SELECT COUNT(DISTINCT user_id) as count FROM user_settings');
+    const logsRes = await pool.query(`SELECT id, updated_at as timestamp, status as event, username as user, user_id as chatid FROM tickets ORDER BY updated_at DESC LIMIT 15`);
+    const accountsRes = await pool.query(`SELECT t.id, t.username as name, t.department as role, t.user_id as chatid, t.status, u.phone_number, u.language, t.created_at, t.academic_year, t.academic_semester FROM tickets t LEFT JOIN user_settings u ON t.user_id = u.user_id INNER JOIN (SELECT user_id, MAX(updated_at) as max_date FROM tickets GROUP BY user_id) latest ON t.user_id = latest.user_id AND t.updated_at = latest.max_date ORDER BY t.updated_at DESC LIMIT 300`);
+    res.json({
+      success: true,
+      metrics: { totalLinked: parseInt(countRes.rows[0]?.count || 0), activeToday: logsRes.rows.length, lastBroadcast: new Date().toISOString().split('T')[0] },
+      logs: logsRes.rows.map(r => ({ id: r.id, timestamp: new Date(r.timestamp).toLocaleString('en-US', { timeZone: 'Africa/Addis_Ababa' }), event: `TICKET_${r.event}`, user: r.user ? `@${r.user}` : 'UNKNOWN', chatId: r.chatid })),
+      accounts: accountsRes.rows.map(r => ({ id: r.id, name: r.name ? `@${r.name}` : 'UNKNOWN', role: formatDeptForDashboard(r.role), phone: r.phone_number || 'Not Provided', chatId: r.chatid, status: r.status, language: r.language === 'am' ? 'Amharic (🇪🇹)' : 'English (🇬🇧)', timestamp: new Date(r.created_at).toLocaleString('en-US', { timeZone: 'Africa/Addis_Ababa' }) }))
+    });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.get('/api/vault-analytics', async (req, res) => {
+  try {
+    const modsRes = await pool.query(`SELECT id, title, department FROM department_modules ORDER BY department ASC, id ASC`);
+    const dlRes = await pool.query(`SELECT module_id, user_id FROM module_downloads`);
+    const dlMap = {}; 
+    dlRes.rows.forEach(r => { if (!dlMap[r.module_id]) dlMap[r.module_id] = new Set(); dlMap[r.module_id].add(String(r.user_id)); });
+
+    const currentSeason = await getGlobalTerm();
+    const usersRes = await pool.query(`SELECT t.user_id, t.username, t.department, u.phone_number, t.global_season FROM tickets t LEFT JOIN user_settings u ON t.user_id = u.user_id INNER JOIN (SELECT user_id, MAX(updated_at) as max_date FROM tickets GROUP BY user_id) latest ON t.user_id = latest.user_id AND t.updated_at = latest.max_date WHERE t.status = 'APPROVED'`);
+
+    const deptUsers = {};
+    usersRes.rows.forEach(u => {
+      if ((u.global_season || 1) >= currentSeason) {
+        const cleanDept = formatDeptForDashboard(u.department);
+        if (!deptUsers[cleanDept]) deptUsers[cleanDept] = [];
+        deptUsers[cleanDept].push({ id: String(u.user_id), name: u.username ? `@${u.username}` : 'UNKNOWN', phone: u.phone_number || 'No Phone' });
+      }
+    });
+
+    const data = modsRes.rows.map(m => {
+      const baseDept = formatDeptForDashboard(m.department);
+      const targetUsers = deptUsers[baseDept] || [];
+      const downloadedUsers = dlMap[m.id] || new Set();
+      const missingStudents = targetUsers.filter(u => !downloadedUsers.has(u.id));
+      const validStudentDownloads = Math.min(targetUsers.length - missingStudents.length, targetUsers.length);
+      return { id: m.id, title: m.title, department: baseDept, downloads: validStudentDownloads, enrolled: targetUsers.length, missing: missingStudents };
+    });
+    res.json({ success: true, data });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+app.get('/api/stats', async (req, res) => {
+  try {
+    const approved = await pool.query("SELECT department, COUNT(*) as count FROM tickets WHERE status = 'APPROVED' GROUP BY department");
+    const pending = await pool.query("SELECT department, COUNT(*) as count FROM tickets WHERE status = 'PENDING' GROUP BY department");
+    const rejected = await pool.query("SELECT department, COUNT(*) as count FROM tickets WHERE status = 'REJECTED' GROUP BY department");
+    const groupAndClean = (rows) => {
+      const map = {};
+      rows.forEach(r => { const c = formatDeptForDashboard(r.department); map[c] = (map[c] || 0) + Number(r.count); });
+      return Object.keys(map).map(k => ({ department: k, count: map[k] }));
+    };
+    res.json({ success: true, stats: { approved: groupAndClean(approved.rows), pending: groupAndClean(pending.rows), rejected: groupAndClean(rejected.rows) }});
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+app.get('/api/export', async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT user_id, username, department, status, rejection_reason, processed_by, academic_year, academic_semester, created_at, updated_at FROM tickets ORDER BY department ASC, status ASC, updated_at DESC`);
+    let csv = "Student Telegram ID,Username,Department & Tag,Academic Term,Status,Rejection Reason,Processed By,Created At,Updated At\n";
+    result.rows.forEach((r) => {
+      const uname = r.username ? `"${r.username.replace(/"/g, '""')}"` : "";
+      const term = `"Y${r.academic_year || 1}-S${r.academic_semester || 1}"`;
+      const reason = r.rejection_reason ? `"${r.rejection_reason.replace(/"/g, '""')}"` : "";
+      const staff = r.processed_by ? `"${r.processed_by.replace(/"/g, '""')}"` : "";
+      csv += `${r.user_id},${uname},"${r.department}",${term},${r.status},${reason},${staff},${r.created_at},${r.updated_at}\n`;
+    });
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="Renaissance_Database_Export.csv"');
+    res.status(200).send('\uFEFF' + csv);
+  } catch (err) { res.status(500).json({ error: 'Failed to generate CSV export.' }); }
+});
+
+app.get('/api/export-audit', async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT user_id, username, department, status, rejection_reason, processed_by, processed_by_id, academic_year, academic_semester, updated_at FROM tickets ORDER BY updated_at DESC`);
+    let csv = "Timestamp,Event Type,Student UID,Username,Assigned Department,Term,Staff Operator,Notes/Reason\n";
+    result.rows.forEach((r) => {
+      const timestamp = new Date(r.updated_at).toLocaleString('en-US', { timeZone: 'Africa/Addis_Ababa' }).replace(/,/g, '');
+      const event = `TICKET_${r.status}`;
+      const uname = r.username ? `"${r.username.replace(/"/g, '""')}"` : "N/A";
+      const dept = `"${formatDeptForDashboard(r.department)}"`;
+      const term = `"Y${r.academic_year || 1}-S${r.academic_semester || 1}"`;
+      const staff = `"${(r.processed_by || "System").replace(/"/g, '""')}"`; 
+      const notes = r.rejection_reason ? `"${r.rejection_reason.replace(/"/g, '""')}"` : "N/A";
+      csv += `${timestamp},${event},${r.user_id},${uname},${dept},${term},${staff},${notes}\n`;
+    });
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="Renaissance_Staff_Audit.csv"');
+    res.status(200).send('\uFEFF' + csv);
+  } catch (err) { res.status(500).json({ error: 'Failed to generate Audit export.' }); }
+});
+
+app.get('/api/certificate/:userId', async (req, res) => {
+  try {
+    const userId = String(req.params.userId);
+    const userRes = await pool.query(`SELECT t.username, t.department, t.processed_by, t.academic_year, t.academic_semester, u.language, t.status FROM tickets t LEFT JOIN user_settings u ON t.user_id = u.user_id WHERE t.user_id = $1 ORDER BY t.updated_at DESC LIMIT 1`, [userId]);
+    if (userRes.rows.length === 0 || userRes.rows[0].status !== 'APPROVED') return res.status(404).send("Error: Approved record not found.");
+    const { username, department, processed_by, academic_year, academic_semester, language } = userRes.rows[0];
+    const pdfPath = await generateApprovalPDF(userId, username || 'N/A', department, processed_by || 'Finance Team', bot.botInfo?.username, language || 'en', academic_year || 1, academic_semester || 1);
+    res.download(pdfPath, `Clearance_${userId}.pdf`, (err) => { const fs = require('fs'); if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath); });
+  } catch (err) { res.status(500).send(`Error: ${err.message}`); }
+});
+
+app.get('/api/student/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const ticketRes = await pool.query("SELECT user_id, username, department, status, rejection_reason, updated_at FROM tickets WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1", [userId]);
+    if (ticketRes.rows.length === 0) return res.status(404).json({ success: false, error: "Not found" });
+    const settingsRes = await pool.query("SELECT phone_number, language FROM user_settings WHERE user_id = $1", [userId]);
+    res.json({ success: true, data: { ...ticketRes.rows[0], department: formatDeptForDashboard(ticketRes.rows[0].department), phone_number: settingsRes.rows[0]?.phone_number || null, language: settingsRes.rows[0]?.language || 'en' }});
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+app.get('/api/modules/:department', async (req, res) => {
+  try {
+    const dept = decodeURIComponent(req.params.department);
+    const mods = await pool.query("SELECT id, title, file_name, created_at FROM department_modules WHERE department ILIKE $1 ORDER BY id ASC", [`%${dept}%`]);
+    res.json({ success: true, count: mods.rows.length, data: mods.rows });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+app.get('/api/roster', async (req, res) => {
+  try {
+    const roster = await pool.query(`SELECT t.user_id, t.username, t.department, t.updated_at FROM tickets t INNER JOIN (SELECT user_id, MAX(updated_at) as max_date FROM tickets WHERE status = 'APPROVED' GROUP BY user_id) latest ON t.user_id = latest.user_id AND t.updated_at = latest.max_date WHERE t.status = 'APPROVED' ORDER BY t.department ASC`);
+    const formatted = roster.rows.map(r => ({ ...r, department: formatDeptForDashboard(r.department) }));
+    res.json({ success: true, count: formatted.length, data: formatted });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
 
 // ============================================================================
 // COMMAND ROUTING & ADMIN TERMINAL OUTPUTS
@@ -236,14 +438,15 @@ bot.on('message:photo', async (ctx) => {
     
     const actionKb = { inline_keyboard: [[{text: "✅ APPROVE", callback_data: `app_${userId}_${dbTopicId}`}, {text: "❌ REJECT", callback_data: `rej_${userId}_${dbTopicId}`}], [{text: "🔄 OVERRIDE DEPT", callback_data: `trans_${userId}_${dbTopicId}`}]] };
     const pRes = await pool.query('SELECT pending_year, pending_semester FROM user_settings WHERE user_id = $1', [userId]);
+    const pendingY = pRes.rows[0]?.pending_year || 1;
+    const pendingS = pRes.rows[0]?.pending_semester || 1;
     
-    // MASSIVE UPGRADE TO INCOMING TICKET UI
-    const cardMsg = `🚨 <b>NEW INCOMING DATA TRANSMISSION</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>👤 <b>STUDENT ALIAS:</b> @${escapeHtml(ctx.from.username || 'Unknown')}\n🆔 <b>SYSTEM UID:</b> <code>${userId}</code>\n🏫 <b>TARGET SECTOR:</b> ${escapeHtml(chosenDeptTagged)}\n📅 <b>ACADEMIC TERM:</b> Year ${pRes.rows[0].pending_year || 1} — Semester ${pRes.rows[0].pending_semester || 1}\n⚙️ <b>GLOBAL COHORT:</b> Season ${currentSeason}</blockquote>\n━━━━━━━━━━━━━━━━━━━━\n⚠️ <i>FINANCE NODE: Analyze the appended transaction artifact above and execute a strict clearance directive below.</i>`;
+    const cardMsg = `🚨 <b>NEW INCOMING DATA TRANSMISSION</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>👤 <b>STUDENT ALIAS:</b> @${escapeHtml(ctx.from.username || 'Unknown')}\n🆔 <b>SYSTEM UID:</b> <code>${userId}</code>\n🏫 <b>TARGET SECTOR:</b> ${escapeHtml(chosenDeptTagged)}\n📅 <b>ACADEMIC TERM:</b> Year ${pendingY} — Semester ${pendingS}\n⚙️ <b>GLOBAL COHORT:</b> Season ${currentSeason}</blockquote>\n━━━━━━━━━━━━━━━━━━━━\n⚠️ <i>FINANCE NODE: Analyze the appended transaction artifact above and execute a strict clearance directive below.</i>`;
     
     const sentTicketMsg = await ctx.api.sendMessage(staffGroupId, cardMsg, { message_thread_id: dbTopicId, parse_mode: 'HTML', reply_markup: actionKb });
     
     await clearPendingDepartment(userId);
-    await pool.query(`INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, department, status, academic_year, academic_semester, global_season) VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10)`, [userId, ctx.from.username || 'Unknown', fileId, dbTopicId, forwardRes.message_id, sentTicketMsg.message_id, chosenDeptTagged, pRes.rows[0].pending_year || 1, pRes.rows[0].pending_semester || 1, currentSeason]);
+    await pool.query(`INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, department, status, academic_year, academic_semester, global_season) VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10)`, [userId, ctx.from.username || 'Unknown', fileId, dbTopicId, forwardRes.message_id, sentTicketMsg.message_id, chosenDeptTagged, pendingY, pendingS, currentSeason]);
     
     await dropMenu(userId, STRINGS[lang].receiptReceived, getStudentKeyboard('PENDING', currentSeason, currentSeason, lang));
   } catch (err) {
@@ -359,6 +562,19 @@ bot.callbackQuery('cmd_history', async (ctx) => {
   await transformMenu(ctx, text, getStudentKeyboard(status, userSeason, currentSeason, lang));
 });
 
+bot.callbackQuery('cmd_help', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const { lang, status, userSeason } = await getUserState(ctx.from.id);
+  await transformMenu(ctx, STRINGS[lang].helpText, getStudentKeyboard(status, userSeason, await getGlobalTerm(), lang));
+});
+
+bot.callbackQuery('cmd_pending_info', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const { lang, status, userSeason } = await getUserState(ctx.from.id);
+  const text = lang === 'am' ? "⏳ <b>ማመልከቻዎ በግምገማ ላይ ነው...</b>\nበአሁኑ ወቅት አዲስ ደረሰኝ መላክ አይችሉም።" : "⏳ <b>SYSTEM LOCKOUT: PENDING REVIEW</b>\n<blockquote>Your submission is currently under active analysis. Duplicate submissions are disabled.</blockquote>";
+  await transformMenu(ctx, text, getStudentKeyboard(status, userSeason, await getGlobalTerm(), lang));
+});
+
 bot.callbackQuery('cmd_cancel_pending', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const userId = ctx.from.id;
@@ -379,8 +595,33 @@ bot.callbackQuery('cmd_cancel_pending', async (ctx) => {
   await transformMenu(ctx, "✅ <b>SUBMISSION CANCELLED</b>\nYour pending receipt was aggressively withdrawn.", getStudentKeyboard(null, 0, await getGlobalTerm(), lang));
 });
 
+bot.callbackQuery('cmd_download_pdf', async (ctx) => {
+  const { lang, status, userSeason } = await getUserState(ctx.from.id);
+  const currentSeason = await getGlobalTerm();
+  if (status !== 'APPROVED' || userSeason < currentSeason) return ctx.answerCallbackQuery("⚠️ No valid clearance.");
+  
+  const res = await pool.query("SELECT department, username, academic_year, academic_semester FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1", [ctx.from.id]);
+  const t = res.rows[0];
+  try {
+    await ctx.answerCallbackQuery("Generating encrypted PDF...");
+    const pdfBuf = await generateApprovalPDF(ctx.from.id, t.username, t.department, 'Finance Office', bot.botInfo?.username, lang, t.academic_year || 1, t.academic_semester || 1);
+    await ctx.replyWithDocument(new InputFile(pdfBuf, `Clearance_${ctx.from.id}.pdf`));
+  } catch (e) { 
+    ctx.answerCallbackQuery("Error generating PDF."); 
+  }
+});
+
+bot.callbackQuery(/^dlmod_(\d+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const modId = Number(ctx.match[1]);
+  const res = await pool.query("SELECT title, file_id FROM department_modules WHERE id = $1", [modId]);
+  if (res.rows.length === 0) return ctx.reply("⚠️ <b>ERROR 404:</b> Document purged or corrupted.", { parse_mode: 'HTML' });
+  try { await pool.query("INSERT INTO module_downloads (module_id, user_id) VALUES ($1, $2) ON CONFLICT (module_id, user_id) DO NOTHING", [modId, ctx.from.id]); } catch (e) {}
+  try { await ctx.replyWithDocument(res.rows[0].file_id, { caption: `📖 <b>${escapeHtml(res.rows[0].title)}</b>\n<blockquote><i>Classified: Renaissance Global Course Module</i></blockquote>`, parse_mode: 'HTML' }); } catch (e) {}
+});
+
 // ============================================================================
-// ADMIN STAFF CALLBACK QUERIES (THE INTENSE UI OVERHAUL)
+// ADMIN STAFF CALLBACK QUERIES (RESTORED HTML & FULL LISTENERS)
 // ============================================================================
 
 bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
@@ -396,7 +637,7 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   await ctx.api.sendMessage(userId, STRINGS[lang].approvedMsg).catch(()=>{});
   await dropMenu(userId, STRINGS[lang].portalWelcome, getStudentKeyboard('APPROVED', await getGlobalTerm(), await getGlobalTerm(), lang));
   
-  await ctx.editMessageText(`✅ <b>CLEARANCE DIRECTIVE: AUTHORIZED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>TARGET UID:</b> <code>${userId}</code>\n• <b>USER ALIAS:</b> @${escapeHtml(username) || 'N/A'}\n• <b>SECTOR:</b> ${escapeHtml(department)}\n• <b>CLEARED BY:</b> ${escapeHtml(staffName)}\n• <b>TIMESTAMP:</b> ${new Date().toLocaleString()}</blockquote>\n\n<i>Clearance PDF generated and transmitted. Subject unlocked.</i>`, { parse_mode: 'HTML' });
+  await ctx.editMessageText(`✅ <b>CLEARANCE DIRECTIVE: AUTHORIZED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>TARGET UID:</b> <code>${userId}</code>\n• <b>USER ALIAS:</b> @${escapeHtml(username) || 'N/A'}\n• <b>SECTOR:</b> ${escapeHtml(department)}\n• <b>CLEARED BY:</b> ${escapeHtml(staffName)}\n• <b>TIMESTAMP:</b> ${new Date().toLocaleString()}</blockquote>\n\n<i>Clearance authorized and system unlocked.</i>`, { parse_mode: 'HTML' });
 });
 
 bot.callbackQuery(/^rej_(\d+)_(\d+)$/, async (ctx) => {
@@ -428,34 +669,224 @@ bot.callbackQuery(/^confirmrej_(\d+)_(\d+)_(.+)$/, async (ctx) => {
   await ctx.editMessageText(`❌ <b>CLEARANCE DIRECTIVE: DENIED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>TARGET UID:</b> <code>${userId}</code>\n• <b>USER ALIAS:</b> @${escapeHtml(username) || 'N/A'}\n• <b>OPERATOR:</b> ${escapeHtml(staffName)}\n• <b>FAULT PARAMETER:</b> ${escapeHtml(reasonText)}</blockquote>\n\n<i>Student terminal locked. Re-transmission demanded.</i>`, { parse_mode: 'HTML' });
 });
 
-bot.callbackQuery('cmd_download_pdf', async (ctx) => {
-  const { lang, status, userSeason } = await getUserState(ctx.from.id);
-  const currentSeason = await getGlobalTerm();
-  if (status !== 'APPROVED' || userSeason < currentSeason) return ctx.answerCallbackQuery("⚠️ No valid clearance.");
-  
-  const res = await pool.query("SELECT department, username, academic_year, academic_semester FROM tickets WHERE user_id = $1 AND status = 'APPROVED' ORDER BY updated_at DESC LIMIT 1", [ctx.from.id]);
-  const t = res.rows[0];
-  try {
-    await ctx.answerCallbackQuery("Generating encrypted PDF...");
-    const pdfBuf = await generateApprovalPDF(ctx.from.id, t.username, t.department, 'Finance Office', bot.botInfo?.username, lang, t.academic_year || 1, t.academic_semester || 1);
-    await ctx.replyWithDocument(new InputFile(pdfBuf, `Clearance_${ctx.from.id}.pdf`));
-  } catch (e) { 
-    ctx.answerCallbackQuery("Error generating PDF."); 
-  }
-});
-
-bot.callbackQuery(/^dlmod_(\d+)$/, async (ctx) => {
+bot.callbackQuery(/^trans_(\d+)_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  const modId = Number(ctx.match[1]);
-  const res = await pool.query("SELECT title, file_id FROM department_modules WHERE id = $1", [modId]);
-  if (res.rows.length === 0) return ctx.reply("⚠️ <b>ERROR 404:</b> Document purged or corrupted.", { parse_mode: 'HTML' });
-  try { await pool.query("INSERT INTO module_downloads (module_id, user_id) VALUES ($1, $2) ON CONFLICT (module_id, user_id) DO NOTHING", [modId, ctx.from.id]); } catch (e) {}
-  try { await ctx.replyWithDocument(res.rows[0].file_id, { caption: `📖 <b>${escapeHtml(res.rows[0].title)}</b>\n<blockquote><i>Classified: Renaissance Global Course Module</i></blockquote>`, parse_mode: 'HTML' }); } catch (e) {}
+  await ctx.editMessageText("📂 <b>SELECT OVERRIDE PARAMETER:</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>Select the correct department routing below:</i>", { parse_mode: 'HTML', reply_markup: getTransferKeyboard(Number(ctx.match[1]), Number(ctx.match[2])) });
 });
 
-// --- SERVER INIT ---
-app.use('/webhook', webhookCallback(bot, 'express'));
-app.get('/', (req, res) => res.send('Renaissance UI Overhaul Bot Active'));
+bot.callbackQuery(/^canceltrans_(\d+)_(\d+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const res = await pool.query('SELECT username, department FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' LIMIT 1', [Number(ctx.match[1]), Number(ctx.match[2])]);
+  if (res.rows.length === 0) return ctx.editMessageText("⚠️ <b>ERROR:</b> Database status mismatch.", { parse_mode: 'HTML' });
+  const kb = new InlineKeyboard().text("✅ APPROVE", `app_${ctx.match[1]}_${ctx.match[2]}`).row().text("❌ REJECT", `rej_${ctx.match[1]}_${ctx.match[2]}`).row().text("🔄 OVERRIDE DEPT", `trans_${ctx.match[1]}_${ctx.match[2]}`);
+  await ctx.editMessageText(`🚨 <b>NEW INCOMING DATA TRANSMISSION</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>👤 <b>STUDENT ALIAS:</b> @${escapeHtml(res.rows[0].username || 'Unknown')}\n🆔 <b>SYSTEM UID:</b> <code>${ctx.match[1]}</code>\n🏫 <b>TARGET SECTOR:</b> ${escapeHtml(res.rows[0].department)}</blockquote>\n━━━━━━━━━━━━━━━━━━━━\n⚠️ <i>FINANCE NODE: Analyze the appended transaction artifact above and execute a strict clearance directive below.</i>`, { parse_mode: 'HTML', reply_markup: kb });
+});
+
+bot.callbackQuery(/^tr_(\d+)_(\d+)_(mkt|biz|agri|ed|acc|log)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const targetUserId = Number(ctx.match[1]);
+  const originTopicId = Number(ctx.match[2]);
+  const staffGroupId = await getActiveStaffGroupId();
+  if (!staffGroupId) return;
+
+  const ticketRes = await pool.query('SELECT topic_id, message_id, ticket_msg_id, username, department, academic_year, academic_semester FROM tickets WHERE user_id = $1 AND topic_id = $2 AND status = \'PENDING\' ORDER BY updated_at DESC LIMIT 1', [targetUserId, originTopicId]);
+  if (ticketRes.rows.length === 0) return ctx.editMessageText("⚠️ <b>ERROR:</b> Artifact processed or vanished.", { parse_mode: 'HTML' });
+
+  const deptMap = { mkt: "Marketing Management", biz: "Business Management", agri: "Agribusiness and Value chain management", ed: "Educational planning and management", acc: "Accounting and finance", log: "Logistics and Supply chain management" };
+  const planSuffix = ticketRes.rows[0].department.includes("(4-Year Complete)") ? "(4-Year Complete)" : "(Regular / Term)";
+  const newDeptTagged = `${deptMap[ctx.match[3]]} ${planSuffix}`;
+  const newTopicId = await getOrCreateDepartmentTopic(ctx, newDeptTagged, staffGroupId);
+
+  const newForwardRes = await ctx.api.copyMessage(staffGroupId, staffGroupId, Number(ticketRes.rows[0].message_id), { message_thread_id: newTopicId });
+  const kb = new InlineKeyboard().text("✅ APPROVE", `app_${targetUserId}_${newTopicId}`).row().text("❌ REJECT", `rej_${targetUserId}_${newTopicId}`).row().text("🔄 OVERRIDE DEPT", `trans_${targetUserId}_${newTopicId}`);
+  const newTicketMsg = await ctx.api.sendMessage(staffGroupId, `🚨 <b>NEW INCOMING DATA (RE-ROUTED)</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>👤 <b>STUDENT ALIAS:</b> @${escapeHtml(ticketRes.rows[0].username)}\n🆔 <b>SYSTEM UID:</b> <code>${targetUserId}</code>\n🏫 <b>TARGET SECTOR:</b> ${escapeHtml(newDeptTagged)}</blockquote>\n━━━━━━━━━━━━━━━━━━━━\n⚠️ <i>FINANCE NODE: Analyze the appended transaction artifact above.</i>`, { message_thread_id: newTopicId, parse_mode: 'HTML', reply_markup: kb });
+
+  await pool.query(`UPDATE tickets SET department = $1, topic_id = $2, message_id = $3, ticket_msg_id = $4, updated_at = CURRENT_TIMESTAMP WHERE user_id = $5 AND status = 'PENDING'`, [newDeptTagged, newTopicId, newForwardRes.message_id, newTicketMsg.message_id, targetUserId]);
+
+  try { await ctx.api.deleteMessage(staffGroupId, Number(ticketRes.rows[0].message_id)); } catch (e) {}
+  try { await ctx.api.deleteMessage(staffGroupId, Number(ticketRes.rows[0].ticket_msg_id)); } catch (e) {}
+
+  try {
+    const { lang } = await getUserState(targetUserId);
+    const msgUpdate = lang === 'am' ? `🔄 <b>መረጃዎ ተስተካክሏል</b>\nየደረሰኝ ማመልከቻዎ ወደ <b>${escapeHtml(newDeptTagged)}</b> ተዛውሯል።` : `🔄 <b>DATABASE UPDATE</b>\nYour dossier has been transferred to <b>${escapeHtml(newDeptTagged)}</b>.`;
+    await ctx.api.sendMessage(targetUserId, `🔔 <b>STATUS UPDATE:</b>\n\n${msgUpdate}`, { parse_mode: 'HTML' });
+    await dropMenu(targetUserId, STRINGS[lang].portalWelcome, getStudentKeyboard('PENDING', await getGlobalTerm(), await getGlobalTerm(), lang));
+  } catch (e) {}
+});
+
+// Admin Control Panel Handlers
+bot.callbackQuery('cmd_panel_revoke', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (!(await isStaff(ctx))) return;
+  await ctx.reply("⚠️ <b>INITIATE STATUS REVOCATION</b>\n\n<i>Reply directly to this system message with the target <b>Student ID</b>.</i>", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML', reply_markup: { force_reply: true } });
+});
+
+bot.callbackQuery('cmd_panel_changedept', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (!(await isStaff(ctx))) return;
+  await ctx.reply("🔄 <b>INITIATE DEPARTMENT OVERRIDE</b>\n\n<i>Reply directly to this system message with the target <b>Student ID</b>.</i>", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML', reply_markup: { force_reply: true } });
+});
+
+bot.callbackQuery('cmd_lookfor', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  await ctx.reply("🔍 <b>DATABASE RECORD QUERY</b>\n━━━━━━━━━━━━━━━━━━━━\n\n<i>Reply directly to this system message with a target <b>UID</b>, <b>@username</b>, or <b>Department Name</b>.</i>", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML', reply_markup: { force_reply: true } });
+});
+
+bot.callbackQuery('cmd_broadcast', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  await ctx.reply("📢 <b>INITIALIZE SYSTEM BROADCAST</b>\n━━━━━━━━━━━━━━━━━━━━\n\n<i>Reply directly to this system message with the exact announcement payload to transmit.</i>", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML', reply_markup: { force_reply: true } });
+});
+
+bot.callbackQuery('cmd_upload_module', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (!(await isStaff(ctx))) return;
+  await ctx.reply("📂 <b>VAULT INGESTION PROTOCOL</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>Select target departmental array:</i>", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML', reply_markup: getModuleDepartmentKeyboard() });
+});
+
+bot.callbackQuery(/^moddept_(.+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (ctx.match[1] === 'cancel') { await clearStaffPendingModuleDept(ctx.from.id); return ctx.editMessageText("❌ <b>OPERATION ABORTED:</b> Ingestion cancelled.", { parse_mode: 'HTML' }); }
+  await setStaffPendingModuleDept(ctx.from.id, ctx.match[1]);
+  await ctx.editMessageText(`✅ <b>TARGET LOCKED:</b> <code>${escapeHtml(ctx.match[1])}</code>\n━━━━━━━━━━━━━━━━━━━━\n\n<i>System ready. Transmit or forward the PDF document to ingest.</i>`, { parse_mode: 'HTML' });
+});
+
+bot.callbackQuery('cmd_delete_module', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (!(await isStaff(ctx))) return;
+  await clearStaffPendingModuleDept(ctx.from.id);
+  await ctx.reply("🗑 <b>MANAGE VAULT PURGE</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>Select a departmental parameter to access its modules for deletion:</i>", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML', reply_markup: getDeleteModuleDepartmentKeyboard() });
+});
+
+bot.callbackQuery(/^delmoddept_(.+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const dept = ctx.match[1];
+  if (dept === 'cancel') return ctx.editMessageText("❌ <b>OPERATION ABORTED:</b> Vault purge cancelled.", { parse_mode: 'HTML' });
+  const res = await pool.query("SELECT id, title FROM department_modules WHERE department ILIKE $1 ORDER BY id ASC", [`%${dept}%`]);
+  if (res.rows.length === 0) return ctx.editMessageText(`ℹ️ <b>VAULT EMPTY:</b> No documents located for <b>${escapeHtml(dept)}</b>.`, { parse_mode: 'HTML' });
+  const kb = new InlineKeyboard();
+  res.rows.forEach((m) => kb.text(`🗑 REMOVE: ${m.title.substring(0,25)}...`, `confirm_delmod_${m.id}`).row());
+  kb.text("🔙 ABORT PROCESS", "delmoddept_cancel");
+  await ctx.editMessageText(`🗑 <b>TARGET SECURED: ${escapeHtml(dept)}</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>Warning: Deleting a module instantly revokes access for all enrolled students.</i>`, { parse_mode: 'HTML', reply_markup: kb });
+});
+
+bot.callbackQuery(/^confirm_delmod_(\d+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const res = await pool.query("DELETE FROM department_modules WHERE id = $1 RETURNING title, department", [Number(ctx.match[1])]);
+  if (res.rowCount === 0) return ctx.editMessageText("⚠️ <b>ERROR:</b> Document already purged or missing.", { parse_mode: 'HTML' });
+  await ctx.editMessageText(`✅ <b>VAULT PURGE SUCCESSFUL</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Title:</b> ${escapeHtml(res.rows[0].title)}\n• <b>Sector:</b> ${escapeHtml(res.rows[0].department)}</blockquote>\n\n<i>Document has been permanently eradicated.</i>`, { parse_mode: 'HTML' });
+});
+
+bot.callbackQuery('cmd_approved_roster', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (!(await isStaff(ctx))) return;
+  await ctx.reply("👥 <b>ACCESS APPROVED DIRECTORY</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>Filter database by departmental parameters:</i>", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML', reply_markup: getApprovedRosterKeyboard() });
+});
+
+bot.callbackQuery(/^roster_(.+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  const targetDept = ctx.match[1];
+  if (targetDept === 'cancel') return ctx.editMessageText("❌ <b>OPERATION ABORTED:</b> Directory search cancelled.", { parse_mode: 'HTML' });
+  const isAll = targetDept === 'all';
+  const cleanDept = targetDept.replace(/\s*\((Regular \/ Term\vert{}4-Year Complete)\)$/, '').trim();
+  let query = `SELECT t.user_id, t.username, t.department, t.processed_by, t.updated_at FROM tickets t INNER JOIN (SELECT user_id, MAX(updated_at) as max_date FROM tickets WHERE status = 'APPROVED' GROUP BY user_id) latest ON t.user_id = latest.user_id AND t.updated_at = latest.max_date WHERE t.status = 'APPROVED'`;
+  const params = [];
+  if (!isAll) { query += ` AND t.department ILIKE $1`; params.push(`%${cleanDept}%`); }
+  query += ` ORDER BY t.department ASC, t.updated_at DESC LIMIT 100`;
+  const res = await pool.query(query, params);
+  if (res.rows.length === 0) return ctx.editMessageText(`ℹ️ <b>DATABASE EMPTY:</b> No approved records in <b>${escapeHtml(cleanDept)}</b>.`, { parse_mode: 'HTML' });
+  
+  let text = `🎓 <b>DATABASE EXPORT: ${escapeHtml(isAll ? "ALL DEPARTMENTS" : cleanDept.toUpperCase())}</b> (<code>${res.rows.length}</code> Total)\n━━━━━━━━━━━━━━━━━━━━\n`;
+  for (let idx = 0; idx < res.rows.length; idx++) {
+    const r = res.rows[idx];
+    let itemText = `<code>[${idx + 1}]</code> <b>${escapeHtml(r.username ? `@${r.username}` : `[No @username]`)}</b> (UID: <code>${r.user_id}</code>)\n`;
+    if ((text + itemText).length > 3800) { await ctx.reply(text, { parse_mode: 'HTML' }); text = ""; }
+    text += itemText;
+  }
+  if (text.trim().length > 0) await ctx.reply(text, { parse_mode: 'HTML' });
+});
+
+bot.callbackQuery(/^notify_mod_(\d+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (!(await isStaff(ctx))) return;
+  const modRes = await pool.query('SELECT title, department FROM department_modules WHERE id = $1', [Number(ctx.match[1])]);
+  if (modRes.rows.length === 0) return ctx.editMessageText("⚠️ <b>ERROR:</b> Target document missing from Vault.", { parse_mode: 'HTML' });
+  const { title, department } = modRes.rows[0];
+  const cleanDept = department.replace(/\s*\((Regular \/ Term\vert{}4-Year Complete)\)$/, '').trim();
+  const currentSeason = await getGlobalTerm();
+  const studentsRes = await pool.query("SELECT DISTINCT user_id, global_season FROM tickets WHERE status = 'APPROVED' AND department ILIKE $1", [`%${cleanDept}%`]);
+  let sentCount = 0;
+  for (const s of studentsRes.rows) {
+    if ((s.global_season || 1) >= currentSeason) {
+        try {
+          const lang = await getUserLang(s.user_id);
+          const dlKb = new InlineKeyboard().text(lang === 'am' ? "⬇️ ሞጁሉን አውርድ" : "⬇️ INITIATE DOWNLOAD", `dlmod_${ctx.match[1]}`);
+          await bot.api.sendMessage(s.user_id, lang === 'am' ? `📚 <b>አዲስ የትምህርት ሞጁል ተጭኗል!</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>ክፍል:</b> ${escapeHtml(cleanDept)}\n• <b>ሞጁል:</b> ${escapeHtml(title)}</blockquote>\n\n<i>ከታች ያለውን ቁልፍ በመጫን ፋይሉን ያውርዱ፡</i>` : `📚 <b>VAULT UPDATE: NEW MODULE SECURED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Department:</b> ${escapeHtml(cleanDept)}\n• <b>File Title:</b> ${escapeHtml(title)}</blockquote>\n\n<i>Authorized users may initiate download below:</i>`, { parse_mode: 'HTML', reply_markup: dlKb });
+          sentCount++; 
+        } catch (e) {}
+    }
+  }
+  await ctx.editMessageText(`📢 <b>SYSTEM BROADCAST SUCCESSFUL</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>Delivered to:</b> <code>${sentCount}</code> nodes.</blockquote>`, { parse_mode: 'HTML' });
+});
+
+bot.callbackQuery('dismiss_mod_notify', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  await ctx.editMessageText("🔕 <b>STEALTH MODE:</b> Document ingested silently. Broadcast skipped.", { parse_mode: 'HTML' });
+});
+
+bot.callbackQuery('cmd_advance_term', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (!(await isStaff(ctx))) return;
+  const currentSeason = await getGlobalTerm();
+  const newSeason = currentSeason + 1;
+  await pool.query('UPDATE group_settings SET global_season = $1', [newSeason]);
+  await ctx.reply(`🔓 <b>NEW REGISTRATION SEASON OPENED!</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote><b>Active Cohort Season:</b> ${newSeason}</blockquote>\n\n<i>The global freeze has been lifted. The 'Transmit Receipt' button is now globally unlocked for all students.</i>`, { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML' });
+});
+
+bot.callbackQuery('cmd_mod_analytics', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (!(await isStaff(ctx))) return;
+  const res = await pool.query(`SELECT m.id, m.title, m.department, COUNT(DISTINCT d.user_id) AS total_downloads FROM department_modules m LEFT JOIN module_downloads d ON m.id = d.module_id GROUP BY m.id, m.title, m.department ORDER BY m.department ASC, total_downloads DESC`);
+  if (res.rows.length === 0) return ctx.reply("📊 <b>VAULT ANALYTICS:</b> Storage array empty.", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML' });
+  let text = "📈 <b>VAULT ENGAGEMENT TELEMETRY</b>\n━━━━━━━━━━━━━━━━━━━━\n";
+  for (const row of res.rows) {
+    const cleanDept = row.department.replace(/\s*\((Regular \/ Term\vert{}4-Year Complete)\)$/, '').trim();
+    const enrolledRes = await pool.query("SELECT COUNT(DISTINCT user_id) as count FROM tickets WHERE status = 'APPROVED' AND department ILIKE $1", [`%${cleanDept}%`]);
+    const totalEnrolled = Number(enrolledRes.rows[0].count) || 0;
+    const downloads = Number(row.total_downloads);
+    const percentage = totalEnrolled > 0 ? Math.round((downloads / totalEnrolled) * 100) : 0;
+    text += `• <b>${escapeHtml(row.title)}</b>\n  ↳ Penetration: <b><code>${downloads}/${totalEnrolled}</code> profiles</b> (<code>${percentage}%</code>)\n`;
+  }
+  await ctx.reply(text, { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML' });
+});
+
+// ============================================================================
+// CRON JOBS
+// ============================================================================
+
+cron.schedule('0 8 * * *', async () => {
+  try {
+    const staffGroupId = await getActiveStaffGroupId();
+    if (!staffGroupId) return;
+    const pendingRes = await pool.query("SELECT COUNT(*) as count FROM tickets WHERE status = 'PENDING'");
+    const text = `🌅 <b>SYSTEM CHRON REPORT (DAILY)</b>\n━━━━━━━━━━━━━━━━━━━━\n\n⏳ <b>Unprocessed Packets:</b> <code>${pendingRes.rows[0].count}</code>`;
+    await bot.api.sendMessage(staffGroupId, text, { message_thread_id: APPROVED_THREAD_ID || null, parse_mode: 'HTML' });
+  } catch (err) {}
+});
+
+cron.schedule('0 10 * * *', async () => {
+  try {
+    const currentSeason = await getGlobalTerm();
+    const stuckUsers = await pool.query(`SELECT u.user_id, u.language, u.pending_department FROM user_settings u LEFT JOIN tickets t ON u.user_id = t.user_id AND t.global_season = $1 WHERE u.pending_department IS NOT NULL AND (t.user_id IS NULL OR t.status != 'PENDING')`, [currentSeason]);
+    for (const row of stuckUsers.rows) {
+      const msg = row.language === 'am' ? `⚠️ <b>ማሳሰቢያ: ማመልከቻዎ አልተጠናቀቀም!</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>ለ <b>${escapeHtml(row.pending_department)}</b> ምዝገባ ጀምረዋል፣ ነገር ግን የክፍያ ደረሰኝ አላስገቡም።</blockquote>` : `⚠️ <b>SYSTEM ALERT: INCOMPLETE REGISTRATION</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>You initiated clearance for <b>${escapeHtml(row.pending_department)}</b> but have not transmitted a receipt photo.</blockquote>`;
+      try { await bot.api.sendMessage(row.user_id, msg, { parse_mode: 'HTML' }); } catch (e) {}
+    }
+  } catch (err) {}
+});
+
+// ============================================================================
+// SERVER START
+// ============================================================================
 
 async function main() {
   await initDB();

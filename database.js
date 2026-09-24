@@ -107,7 +107,7 @@ async function clearStaffPendingModuleDept(userId) {
 }
 
 async function getOrCreateDepartmentTopic(ctx, departmentName, targetGroupId) {
-  const baseDept = departmentName.replace(/\s*\((Regular \/ Term\vert{}4-Year Complete)\)$/, '').trim();
+  const baseDept = departmentName.replace(/\s*\((Regular \/ Term|4-Year Complete)\)$/, '').trim();
   const cached = await pool.query('SELECT topic_id FROM department_topics WHERE group_id = $1 AND department = $2 LIMIT 1', [targetGroupId, baseDept]);
   if (cached.rows.length > 0) return Number(cached.rows[0].topic_id);
   
@@ -134,7 +134,7 @@ function escapeHtml(str) {
 
 function formatDeptForDashboard(dept) {
   if (!dept) return 'Unassigned';
-  let cleaned = String(dept).replace(/\s*\((Regular \/ Term\vert{}4-Year Complete)\)/ig, '').trim();
+  let cleaned = String(dept).replace(/\s*\((Regular \/ Term|4-Year Complete)\)/ig, '').trim();
   return cleaned || 'Unassigned';
 }
 
