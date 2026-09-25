@@ -111,6 +111,58 @@ app.post('/api/broadcast', async (req, res) => {
   } catch (error) {}
 });
 
+// --- REACT DASHBOARD ADMIN COMMANDS ---
+app.post('/api/admin-command', express.json(), async (req, res) => {
+  const { userId, command, newDept } = req.body;
+  const staffName = "Web Dashboard Admin";
+
+  try {
+    if (command === 'WIPE') {
+      await pool.query("UPDATE tickets SET status = 'WIPED', rejection_reason = 'System Profile Wiped by Admin', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2", [staffName, userId]);
+      await pool.query('UPDATE user_settings SET pending_year = 1, pending_semester = 1, pending_department = NULL WHERE user_id = $1', [userId]);
+      
+      try {
+        const { lang } = await getUserState(userId);
+        const wipeKb = await buildStudentMenu(userId, lang, 'WIPED');
+        await bot.api.sendMessage(userId, "🚫 <b>CRITICAL SYSTEM LOCKOUT</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>Your academic profile, historical records, and Vault access have been aggressively expunged by administration.</blockquote>\n\n<i>Click below to re-initiate the registration protocol from a blank slate.</i>", { parse_mode: 'HTML', reply_markup: wipeKb });
+      } catch(e) {}
+      
+      return res.json({ success: true, message: `Student UID ${userId} wiped completely.` });
+    }
+
+    if (command === 'REVOKE' || command === 'REJECT') {
+      await pool.query("UPDATE tickets SET status = 'REJECTED', rejection_reason = 'Revoked via Dashboard', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2", [staffName, userId]);
+      
+      try { 
+        await bot.api.sendMessage(userId, "⚠️ <b>STATUS UPDATE:</b>\n\nYour clearance has been rejected or revoked. Please contact administration.", { parse_mode: 'HTML' }); 
+      } catch(e) {}
+      
+      return res.json({ success: true, message: `Clearance rejected for UID ${userId}.` });
+    }
+
+    if (command === 'APPROVE') {
+      const updateRes = await pool.query("UPDATE tickets SET status = 'APPROVED', processed_by = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND status = 'PENDING' RETURNING department, username", [staffName, userId]);
+      
+      if (updateRes.rowCount > 0) {
+        try { 
+          await bot.api.sendMessage(userId, "✅ <b>SYSTEM CLEARANCE APPROVED</b>\nYour tuition transaction has been verified by the Finance Office.", { parse_mode: 'HTML' }); 
+        } catch(e) {}
+      }
+      return res.json({ success: true, message: `UID ${userId} approved successfully.` });
+    }
+
+    if (command === 'OVERRIDE_DEPT' && newDept) {
+      await pool.query("UPDATE tickets SET department = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2", [newDept, userId]);
+      return res.json({ success: true, message: `Department for UID ${userId} changed to ${newDept}.` });
+    }
+
+    res.status(400).json({ error: "Invalid command or missing parameters." });
+  } catch (err) {
+    console.error("[Admin API Error]:", err.message);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
+
 app.get('/api/live-dashboard', async (req, res) => {
   try {
     const countRes = await pool.query('SELECT COUNT(DISTINCT user_id) as count FROM user_settings');
