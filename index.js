@@ -935,7 +935,9 @@ cron.schedule('0 8 * * *', async () => {
     const staffGroupId = await getActiveStaffGroupId();
     if (!staffGroupId) return;
     const pendingRes = await pool.query("SELECT COUNT(*) as count FROM tickets WHERE status = 'PENDING'");
-    const text = `🌅 <b>SYSTEM CHRON REPORT (DAILY)</b>\n━━━━━━━━━━━━━━━━━━━━\n\n⏳ <b>Unprocessed Packets:</b> <code>${pendingRes.rows[0].count}</code>`;
+    
+    const text = `🌅 <b>SYSTEM CHRON REPORT (DAILY)</b>\n━━━━━━━━━━━━━━━━━━━━\n\n⏳ <b>Unprocessed Packets:</b> <code>${pendingRes.rows[0].count}</code>\n\n${await generateSummaryText('APPROVED')}\n\n${await generateSummaryText('REJECTED')}`;
+    
     await bot.api.sendMessage(staffGroupId, text, { message_thread_id: APPROVED_THREAD_ID || null, parse_mode: 'HTML' });
   } catch (err) {}
 });
