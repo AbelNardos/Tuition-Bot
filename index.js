@@ -338,35 +338,56 @@ bot.on('message:photo', async (ctx) => {
     const chosenDeptTagged = await getPendingDepartment(userId);
     if (!chosenDeptTagged) return dropMenu(userId, "⚠️ <b>ERROR:</b> Select an academic department first.", await buildStudentMenu(userId, lang, status));
 
-    // 1. Alert the student that the automated scan is running
     const scanMsg = await ctx.reply(lang === 'am' ? "⏳ <i>ደረሰኙን በሲስተሙ በመፈተሽ ላይ...</i>" : "⏳ <i>Running automated OCR scan on document...</i>", { parse_mode: 'HTML' });
 
     const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-    
-    // 2. Fetch the file URL from Telegram's API
     const file = await ctx.api.getFile(fileId);
     const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
 
-    // 3. Ping the OCR.space API (Engine 2 is optimized for numbers/receipts)
+    // NEW: Download the image to the bot's memory first to bypass OCR.space URL blocks
+    const imgResponse = await fetch(fileUrl);
+    const imgBuffer = await imgResponse.arrayBuffer();
+    const base64Image = `data:image/jpeg;base64,${Buffer.from(imgBuffer).toString('base64')}`;
+
     const ocrApiKey = process.env.OCR_API_KEY || 'helloworld';
-    const ocrResponse = await fetch(`https://api.ocr.space/parse/imageurl?apikey=${ocrApiKey}&url=${encodeURIComponent(fileUrl)}&detectOrientation=true&scale=true&OCREngine=2`);
+    const formData = new URLSearchParams();
+    formData.append('base64Image', base64Image);
+    formData.append('detectOrientation', 'true');
+    formData.append('scale', 'true');
+    formData.append('OCREngine', '2');
+
+    // 3. Ping the OCR.space API via a secure POST request
+    const ocrResponse = await fetch('https://api.ocr.space/parse/image', {
+      method: 'POST',
+      headers: { 'apikey': ocrApiKey },
+      body: formData
+    });
     const ocrData = await ocrResponse.json();
     
     let extractedText = "";
-    if (ocrData && ocrData.ParsedResults && ocrData.ParsedResults.length > 0) {
-      extractedText = String(ocrData.ParsedResults[0].ParsedText).toUpperCase();
+    let apiFailed = false;
+
+    // Failsafe: Detect if OCR.space rejected the request due to limits or downtime
+    if (ocrData) {
+      if (ocrData.IsErroredOnProcessing || ocrData.ErrorMessage) {
+        apiFailed = true;
+      } else if (ocrData.ParsedResults && ocrData.ParsedResults.length > 0) {
+        extractedText = String(ocrData.ParsedResults[0].ParsedText).toUpperCase();
+      }
+    } else {
+      apiFailed = true;
     }
 
-    // 4. Validate against core banking keywords or transaction digits
-    const validKeywords = ['CBE', 'COMMERCIAL BANK', 'AWASH', 'TELEBIRR', 'BIRR', 'ETB', 'BOA'];
+    // UPDATED: Broadened keyword array to catch all types of Ethiopian bank receipts
+    const validKeywords = ['CBE', 'COMMERCIAL BANK', 'AWASH', 'TELEBIRR', 'BIRR', 'ETB', 'BOA', 'DEPOSIT', 'TRANSACTION', 'SUCCESS', 'COMPLETED', 'TRANSFER', 'NIB', 'DASHEN'];
     const hasKeyword = validKeywords.some(kw => extractedText.includes(kw));
-    const hasDigits = (extractedText.match(/\d{4,}/) !== null); // Looking for a sequence of at least 4 numbers (transaction ID or amount)
+    const hasDigits = (extractedText.match(/\d{4,}/) !== null); 
     
-    const isValid = hasKeyword || hasDigits;
+    // Fallback: If OCR API crashes, pass it to humans instead of incorrectly rejecting the student
+    const isValid = apiFailed || hasKeyword || hasDigits;
 
     try { await ctx.api.deleteMessage(ctx.chat.id, scanMsg.message_id); } catch(e) {}
 
-    // 5. Hard Block: Reject immediately if the receipt fails the OCR scan
     if (!isValid) {
       const failText = lang === 'am' 
         ? "⚠️ <b>አውቶማቲክ ቅኝት አልተሳካም!</b>\nየባንክ መረጃ፣ የክፍያ መጠን ወይም ትክክለኛ የትራንዛክሽን ቁጥር በፎቶው ላይ አልተገኙም። እባክዎን ግልጽ የሆነ ፎቶ በድጋሚ ይላኩ።" 
@@ -374,7 +395,6 @@ bot.on('message:photo', async (ctx) => {
       return ctx.reply(failText, { parse_mode: 'HTML' });
     }
 
-    // 6. Proceed to route to Staff Group if scan passes
     const staffGroupId = await getActiveStaffGroupId();
     if (!staffGroupId) return;
 
@@ -395,7 +415,10 @@ bot.on('message:photo', async (ctx) => {
     
     const uname = ctx.from.username || ctx.from.first_name || 'Unknown';
     
-    const cardMsg = `🚨 <b>NEW INCOMING DATA TRANSMISSION</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>👤 <b>STUDENT ALIAS:</b> @${escapeHtml(uname)}\n🆔 <b>SYSTEM UID:</b> <code>${userId}</code>\n🏫 <b>TARGET SECTOR:</b> ${escapeHtml(chosenDeptTagged)}\n📅 <b>ACADEMIC TERM:</b> Year ${pendingY} — Semester ${pendingS}\n⚙️ <b>GLOBAL COHORT:</b> Season ${currentSeason}\n🤖 <b>OCR STATUS:</b> Pre-Scan Passed</blockquote>\n━━━━━━━━━━━━━━━━━━━━\n⚠️ <i>FINANCE NODE: Analyze the appended transaction artifact above and execute a strict clearance directive below.</i>`;
+    // Add dynamic label to the Staff Group ticket
+    const scanStatusText = apiFailed ? '⚠️ OCR API Offline - Manual Verification Required' : '✅ Pre-Scan Passed';
+
+    const cardMsg = `🚨 <b>NEW INCOMING DATA TRANSMISSION</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>👤 <b>STUDENT ALIAS:</b> @${escapeHtml(uname)}\n🆔 <b>SYSTEM UID:</b> <code>${userId}</code>\n🏫 <b>TARGET SECTOR:</b> ${escapeHtml(chosenDeptTagged)}\n📅 <b>ACADEMIC TERM:</b> Year ${pendingY} — Semester ${pendingS}\n⚙️ <b>GLOBAL COHORT:</b> Season ${currentSeason}\n🤖 <b>OCR STATUS:</b> ${scanStatusText}</blockquote>\n━━━━━━━━━━━━━━━━━━━━\n⚠️ <i>FINANCE NODE: Analyze the appended transaction artifact above and execute a strict clearance directive below.</i>`;
     
     const sentTicketMsg = await ctx.api.sendMessage(staffGroupId, cardMsg, { message_thread_id: dbTopicId, parse_mode: 'HTML', reply_markup: actionKb });
     
