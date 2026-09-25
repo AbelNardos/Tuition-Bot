@@ -326,16 +326,17 @@ bot.on('message:contact', async (ctx) => {
 bot.on('message:photo', async (ctx) => {
   if (ctx.chat.type !== 'private' || ctx.from.is_bot) return;
   const userId = ctx.from.id;
-  const { lang, status } = await getUserState(userId);
+  const { lang, status, userSeason } = await getUserState(userId);
+  const currentSeason = await getGlobalTerm();
 
   if (activeUploads.has(userId)) return;
   activeUploads.add(userId);
 
   try {
-    if (status === 'PENDING') return dropMenu(userId, STRINGS[lang].pendingExists, await buildStudentMenu(userId, lang, 'PENDING'));
+    if (status === 'PENDING') return dropMenu(userId, STRINGS[lang].pendingExists, getStudentKeyboard('PENDING', userSeason, currentSeason, lang));
     
     const chosenDeptTagged = await getPendingDepartment(userId);
-    if (!chosenDeptTagged) return dropMenu(userId, "⚠️ <b>ERROR:</b> Select an academic department first.", await buildStudentMenu(userId, lang, status));
+    if (!chosenDeptTagged) return dropMenu(userId, "⚠️ <b>ERROR:</b> Select an academic department first.", getStudentKeyboard(status, userSeason, currentSeason, lang));
 
     const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
     const staffGroupId = await getActiveStaffGroupId();
@@ -355,16 +356,18 @@ bot.on('message:photo', async (ctx) => {
     const pRes = await pool.query('SELECT pending_year, pending_semester FROM user_settings WHERE user_id = $1', [userId]);
     const pendingY = pRes.rows[0]?.pending_year || 1;
     const pendingS = pRes.rows[0]?.pending_semester || 1;
-    const currentSeason = await getGlobalTerm();
     
-    const cardMsg = `🚨 <b>NEW INCOMING DATA TRANSMISSION</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>👤 <b>STUDENT ALIAS:</b> @${escapeHtml(ctx.from.username || 'Unknown')}\n🆔 <b>SYSTEM UID:</b> <code>${userId}</code>\n🏫 <b>TARGET SECTOR:</b> ${escapeHtml(chosenDeptTagged)}\n📅 <b>ACADEMIC TERM:</b> Year ${pendingY} — Semester ${pendingS}\n⚙️ <b>GLOBAL COHORT:</b> Season ${currentSeason}</blockquote>\n━━━━━━━━━━━━━━━━━━━━\n⚠️ <i>FINANCE NODE: Analyze the appended transaction artifact above and execute a strict clearance directive below.</i>`;
+    // FIXED: Safely grab their display name if they don't have a Telegram username
+    const uname = ctx.from.username || ctx.from.first_name || 'Unknown';
+    
+    const cardMsg = `🚨 <b>NEW INCOMING DATA TRANSMISSION</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>👤 <b>STUDENT ALIAS:</b> @${escapeHtml(uname)}\n🆔 <b>SYSTEM UID:</b> <code>${userId}</code>\n🏫 <b>TARGET SECTOR:</b> ${escapeHtml(chosenDeptTagged)}\n📅 <b>ACADEMIC TERM:</b> Year ${pendingY} — Semester ${pendingS}\n⚙️ <b>GLOBAL COHORT:</b> Season ${currentSeason}</blockquote>\n━━━━━━━━━━━━━━━━━━━━\n⚠️ <i>FINANCE NODE: Analyze the appended transaction artifact above and execute a strict clearance directive below.</i>`;
     
     const sentTicketMsg = await ctx.api.sendMessage(staffGroupId, cardMsg, { message_thread_id: dbTopicId, parse_mode: 'HTML', reply_markup: actionKb });
     
     await clearPendingDepartment(userId);
-    await pool.query(`INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, department, status, academic_year, academic_semester, global_season) VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10)`, [userId, ctx.from.username || 'Unknown', fileId, dbTopicId, forwardRes.message_id, sentTicketMsg.message_id, chosenDeptTagged, pendingY, pendingS, currentSeason]);
+    await pool.query(`INSERT INTO tickets (user_id, username, receipt_file_id, topic_id, message_id, ticket_msg_id, department, status, academic_year, academic_semester, global_season) VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10)`, [userId, uname, fileId, dbTopicId, forwardRes.message_id, sentTicketMsg.message_id, chosenDeptTagged, pendingY, pendingS, currentSeason]);
     
-    await dropMenu(userId, STRINGS[lang].receiptReceived, await buildStudentMenu(userId, lang, 'PENDING'));
+    await dropMenu(userId, STRINGS[lang].receiptReceived, getStudentKeyboard('PENDING', currentSeason, currentSeason, lang));
   } catch (err) {
     console.error("[Photo Handler Error]:", err.message);
   } finally { 
@@ -458,6 +461,35 @@ bot.on('message:text', async (ctx, next) => {
     } catch (e) {}
 
     return ctx.reply(`✅ <b>STATUS REVOKED</b>\nUID <code>${targetUid}</code> locked out.`, { message_thread_id: topicId, parse_mode: 'HTML' });
+  }
+  if (orig.includes("INITIATE STUDENT WIPE")) {
+    const targetUid = Number(input);
+    if (isNaN(targetUid)) return ctx.reply("⚠️ <b>ERROR:</b> Invalid UID format.", { message_thread_id: topicId, parse_mode: 'HTML' });
+    
+    const staffName = `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim() || `Staff`;
+    const updateRes = await pool.query("UPDATE tickets SET status = 'WIPED', rejection_reason = 'System Profile Wiped by Admin', processed_by = $1, processed_by_id = $2, updated_at = CURRENT_TIMESTAMP WHERE user_id = $3 RETURNING username, department", [staffName, ctx.from.id, targetUid]);
+    
+    if (updateRes.rowCount === 0) return ctx.reply(`❌ <b>WIPE OPERATION FAILED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>Target UID <code>${targetUid}</code> not located in active records.</blockquote>`, { message_thread_id: topicId, parse_mode: 'HTML' });
+
+    await pool.query('UPDATE user_settings SET pending_year = 1, pending_semester = 1, pending_department = NULL WHERE user_id = $1', [targetUid]);
+    pushToGoogleSheet(targetUid, updateRes.rows[0].username, updateRes.rows[0].department, 'WIPED', staffName, 'Wiped by Admin');
+
+    try {
+      const { lang } = await getUserState(targetUid);
+      const wipeKb = await buildStudentMenu(targetUid, lang, 'WIPED');
+      await dropMenu(targetUid, "🚫 <b>CRITICAL SYSTEM LOCKOUT</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>Your academic profile, historical records, and Vault access have been aggressively expunged by administration.</blockquote>\n\n<i>Click below to re-initiate the registration protocol from a blank slate.</i>", wipeKb);
+    } catch(e) {}
+
+    return ctx.reply(`✅ <b>STUDENT DOSSIER EXPUNGED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote><b>TARGET UID:</b> <code>${targetUid}</code>\n<b>STATUS:</b> All records successfully revoked.</blockquote>`, { message_thread_id: topicId, parse_mode: 'HTML' });
+  }
+
+  if (orig.includes("SET REGISTRATION DEADLINE")) {
+    const usersRes = await pool.query('SELECT DISTINCT user_id FROM user_settings');
+    let count = 0;
+    for (const row of usersRes.rows) {
+      try { await bot.api.sendMessage(row.user_id, `⏳ <b>URGENT: REGISTRATION DEADLINE</b>\n━━━━━━━━━━━━━━━━━━━━\n\n${escapeHtml(input)}`, { parse_mode: 'HTML' }); count++; } catch (e) {}
+    }
+    return ctx.reply(`✅ <b>DEADLINE BROADCAST SUCCESSFUL:</b> Alerted <code>${count}</code> active nodes.`, { message_thread_id: topicId, parse_mode: 'HTML' });
   }
   return next();
 });
@@ -760,6 +792,18 @@ bot.callbackQuery('cmd_panel_revoke', async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   if (!(await isStaff(ctx))) return;
   await ctx.reply("⚠️ <b>INITIATE STATUS REVOCATION</b>\n\n<i>Reply directly to this system message with the target <b>Student ID</b>.</i>", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML', reply_markup: { force_reply: true } });
+});
+
+bot.callbackQuery('cmd_panel_wipe', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (!(await isStaff(ctx))) return;
+  await ctx.reply("🚷 <b>INITIATE STUDENT WIPE</b>\n\n<i>Reply directly to this system message with the target <b>Student ID</b>. This will permanently erase their profile and vault access.</i>", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML', reply_markup: { force_reply: true } });
+});
+
+bot.callbackQuery('cmd_panel_deadline', async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  if (!(await isStaff(ctx))) return;
+  await ctx.reply("⏳ <b>SET REGISTRATION DEADLINE</b>\n\n<i>Reply directly to this system message with the deadline details (e.g., 'Friday at Midnight'). This will broadcast an urgent alert to all students.</i>", { message_thread_id: ctx.callbackQuery.message.message_thread_id, parse_mode: 'HTML', reply_markup: { force_reply: true } });
 });
 
 bot.callbackQuery('cmd_stats', async (ctx) => {

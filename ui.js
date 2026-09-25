@@ -44,6 +44,7 @@ function getStaffKeyboard() {
     .text('🟢 APPROVED DIRECTORY', 'cmd_approved_roster').text('🔍 SEARCH ID', 'cmd_lookfor').row()
     .text('📂 UPLOAD MODULE', 'cmd_upload_module').text('🗑 MANAGE VAULT', 'cmd_delete_module').row()
     .text('🔄 OVERRIDE DEPT', 'cmd_panel_changedept').text('⚠️ REVOKE STATUS', 'cmd_panel_revoke').row()
+    .text('🚷 WIPE STUDENT', 'cmd_panel_wipe').text('⏳ SET DEADLINE', 'cmd_panel_deadline').row()
     .text('📊 LIVE ANALYTICS', 'cmd_stats').text('📈 VAULT STATS', 'cmd_mod_analytics').row()
     .text('📥 EXPORT DATABASE (CSV)', 'cmd_export').row()
     .text('🔓 OPEN NEW REGISTRATION', 'cmd_advance_term').row()
