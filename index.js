@@ -634,7 +634,10 @@ bot.callbackQuery(/^dlmod_(\d+)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   const modId = Number(ctx.match[1]);
   const res = await pool.query("SELECT title, file_id FROM department_modules WHERE id = $1", [modId]);
-  if (res.rows.length === 0) return ctx.reply("⚠️ <b>ERROR 404:</b> Document purged or corrupted.", { parse_mode: 'HTML' });
+  
+  // FIXED: Replaced "ERROR 404" with a professional vault notification
+  if (res.rows.length === 0) return ctx.reply("🗄️ <b>DOCUMENT ARCHIVED</b>\n<blockquote>This module has been withdrawn or updated by the administration.</blockquote>", { parse_mode: 'HTML' });
+  
   try { await pool.query("INSERT INTO module_downloads (module_id, user_id) VALUES ($1, $2) ON CONFLICT (module_id, user_id) DO NOTHING", [modId, ctx.from.id]); } catch (e) {}
   try { await ctx.replyWithDocument(res.rows[0].file_id, { caption: `📖 <b>${escapeHtml(res.rows[0].title)}</b>\n<blockquote><i>Classified: Renaissance Global Course Module</i></blockquote>`, parse_mode: 'HTML' }); } catch (e) {}
 });
@@ -818,7 +821,8 @@ bot.callbackQuery(/^app_(\d+)_(\d+)$/, async (ctx) => {
   const { department, username } = updateRes.rows[0];
   const { lang } = await getUserState(userId);
   
-  await ctx.api.sendMessage(userId, STRINGS[lang].approvedMsg).catch(()=>{});
+  // FIXED: Added { parse_mode: 'HTML' } so the <b> tags render correctly
+  await ctx.api.sendMessage(userId, STRINGS[lang].approvedMsg, { parse_mode: 'HTML' }).catch(()=>{});
   await dropMenu(userId, STRINGS[lang].portalWelcome, await buildStudentMenu(userId, lang, 'APPROVED'));
   
   await ctx.editMessageText(`✅ <b>CLEARANCE DIRECTIVE: AUTHORIZED</b>\n━━━━━━━━━━━━━━━━━━━━\n<blockquote>• <b>TARGET UID:</b> <code>${userId}</code>\n• <b>USER ALIAS:</b> @${escapeHtml(username) || 'N/A'}\n• <b>SECTOR:</b> ${escapeHtml(department)}\n• <b>CLEARED BY:</b> ${escapeHtml(staffName)}\n• <b>TIMESTAMP:</b> ${new Date().toLocaleString()}</blockquote>\n\n<i>Clearance authorized and system unlocked.</i>`, { parse_mode: 'HTML' });
